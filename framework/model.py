@@ -26,11 +26,11 @@ class Model():
     def resume_checkpoint(self, checkpoint_path):
         checkpoint = torch.load(checkpoint_path)
         self.model.load_state_dict(checkpoint['model_state_dict'])
-        # self.model.train()
+        self.model.train()
 
     def save_model(self, checkpoint, save_path):
         torch.save(checkpoint, save_path)
 
     def load_model(self, model_path):
         self.model.load_state_dict(torch.load(model_path))
-        # self.model.eval()
+        self.model.eval()
