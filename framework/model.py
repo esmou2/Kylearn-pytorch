@@ -9,7 +9,7 @@ class Model():
             print("INFO: CUDA device exists")
 
     @abstractmethod
-    def loss(self, **kwargs):
+    def loss_cross_entropy(self, **kwargs):
         pass
 
     @abstractmethod

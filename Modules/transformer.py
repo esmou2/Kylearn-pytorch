@@ -3,12 +3,16 @@ import torch.nn as nn
 import numpy as np
 from Layers.transformer import EncoderLayer, DecoderLayer
 
-def get_non_pad_mask(seq):
+
+def get_non_pad_mask(seq, padding_idx=0):
     assert seq.dim() == 2
-    return seq.ne(0).type(torch.float).unsqueeze(-1)
+    mask = seq.ne(padding_idx).type(torch.float)
+    return mask.unsqueeze(-1)
+
 
 def get_sinusoid_encoding_table(n_position, d_hid, padding_idx=None):
     ''' Sinusoid position encoding table '''
+    n_position += 1
 
     def cal_angle(position, hid_idx):
         return position / np.power(10000, 2 * (hid_idx // 2) / d_hid)
@@ -27,15 +31,27 @@ def get_sinusoid_encoding_table(n_position, d_hid, padding_idx=None):
 
     return torch.FloatTensor(sinusoid_table)
 
-def get_attn_key_pad_mask(seq_k, seq_q):
-    ''' For masking out the padding part of key sequence. '''
+
+def get_attn_key_pad_mask(seq_k, seq_q, padding_idx=0):
+    '''
+        For masking out the padding part of key sequence.
+        Arguments:
+            seq_k {Tensor, shape [batch, k]} -- key sequence
+            seq_q {Tensor, shape [batch, q]} -- query sequence
+
+        Returns:
+            padding_mask {Tensor, shape [batch, q, k]} -- mask matrix
+            key mask [batch, k] -> expand q times [batch, q, k]
+
+    '''
 
     # Expand to fit the shape of key query attention matrix.
     len_q = seq_q.size(1)
-    padding_mask = seq_k.eq(0)
+    padding_mask = seq_k.eq(padding_idx)
     padding_mask = padding_mask.unsqueeze(1).expand(-1, len_q, -1)  # b x lq x lk
 
     return padding_mask
+
 
 def get_subsequent_mask(seq):
     ''' For masking out the subsequent info. '''
@@ -47,55 +63,55 @@ def get_subsequent_mask(seq):
 
     return subsequent_mask
 
+
 class Encoder(nn.Module):
-    ''' A encoder model with self attention mechanism. '''
+    ''' A encoder models with self attention mechanism. '''
 
     def __init__(
-            self,
-            n_src_vocab, len_max_seq, d_word_vec,
+            self, embedding,
+            len_max_seq, d_word_vec,
             n_layers, n_head, d_k, d_v,
             d_model, d_inner, dropout=0.1):
 
         super().__init__()
 
-        n_position = len_max_seq + 1
-
-        self.src_word_emb = nn.Embedding(
-            n_src_vocab, d_word_vec, padding_idx=0)
+        self.word_embedding = nn.Embedding.from_pretrained(embedding)
 
         self.position_enc = nn.Embedding.from_pretrained(
-            get_sinusoid_encoding_table(n_position, d_word_vec, padding_idx=0),
+            get_sinusoid_encoding_table(len_max_seq, d_word_vec, padding_idx=0),
             freeze=True)
 
         self.layer_stack = nn.ModuleList([
             EncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout)
             for _ in range(n_layers)])
 
-    def forward(self, src_seq, src_pos, return_attns=False):
+    def forward(self, sequence, position, return_attns=False):
 
-        enc_slf_attn_list = []
+        encoder_self_attn_list = []
 
         # -- Prepare masks
-        slf_attn_mask = get_attn_key_pad_mask(seq_k=src_seq, seq_q=src_seq)
-        non_pad_mask = get_non_pad_mask(src_seq)
+        slf_attn_mask = get_attn_key_pad_mask(seq_k=sequence, seq_q=sequence,
+                                              padding_idx=0)  # [batch_size, seq_length, seq_length]
+        non_pad_mask = get_non_pad_mask(sequence, padding_idx=0)  # [batch_size, seq_length, 1]
 
         # -- Forward
-        enc_output = self.src_word_emb(src_seq) + self.position_enc(src_pos)
+        enc_output = self.word_embedding(sequence) + self.position_enc(position)
 
         for enc_layer in self.layer_stack:
-            enc_output, enc_slf_attn = enc_layer(
+            enc_output, encoder_self_attn = enc_layer(
                 enc_output,
                 non_pad_mask=non_pad_mask,
                 slf_attn_mask=slf_attn_mask)
             if return_attns:
-                enc_slf_attn_list += [enc_slf_attn]
+                encoder_self_attn_list += [encoder_self_attn]
 
         if return_attns:
-            return enc_output, enc_slf_attn_list
+            return enc_output, encoder_self_attn_list
         return enc_output,
 
+
 class Decoder(nn.Module):
-    ''' A decoder model with self attention mechanism. '''
+    ''' A decoder models with self attention mechanism. '''
 
     def __init__(
             self,
@@ -148,12 +164,13 @@ class Decoder(nn.Module):
             return dec_output, dec_slf_attn_list, dec_enc_attn_list
         return dec_output,
 
+
 class Transformer(nn.Module):
-    ''' A sequence to sequence model with attention mechanism. '''
+    ''' A sequence to sequence models with attention mechanism. '''
 
     def __init__(
             self,
-            n_src_vocab, n_tgt_vocab, len_max_seq,
+            embedding, n_tgt_vocab, len_max_seq,
             d_word_vec=512, d_model=512, d_inner=2048,
             n_layers=6, n_head=8, d_k=64, d_v=64, dropout=0.1,
             tgt_emb_prj_weight_sharing=True,
@@ -162,7 +179,8 @@ class Transformer(nn.Module):
         super().__init__()
 
         self.encoder = Encoder(
-            n_src_vocab=n_src_vocab, len_max_seq=len_max_seq,
+            embedding=embedding,
+            len_max_seq=len_max_seq,
             d_word_vec=d_word_vec, d_model=d_model, d_inner=d_inner,
             n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
             dropout=dropout)
@@ -177,8 +195,8 @@ class Transformer(nn.Module):
         nn.init.xavier_normal_(self.tgt_word_prj.weight)
 
         assert d_model == d_word_vec, \
-        'To facilitate the residual connections, \
-         the dimensions of all module outputs shall be the same.'
+            'To facilitate the residual connections, \
+             the dimensions of all module outputs shall be the same.'
 
         if tgt_emb_prj_weight_sharing:
             # Share the weight matrix between target word embedding & the final logit dense layer
@@ -189,9 +207,9 @@ class Transformer(nn.Module):
 
         if emb_src_tgt_weight_sharing:
             # Share the weight matrix between source & target word embeddings
-            assert n_src_vocab == n_tgt_vocab, \
+            # assert n_src_vocab == n_tgt_vocab, \
             "To share word embedding table, the vocabulary size of src/tgt shall be the same."
-            self.encoder.src_word_emb.weight = self.decoder.tgt_word_emb.weight
+            self.encoder.word_embedding.weight = self.decoder.tgt_word_emb.weight
 
     def forward(self, src_seq, src_pos, tgt_seq, tgt_pos):
 
@@ -204,4 +222,38 @@ class Transformer(nn.Module):
         return seq_logit.view(-1, seq_logit.size(2))
 
 
+class TransformerCls(nn.Module):
+    '''Transformer module for classification'''
 
+    def __init__(
+            self,
+            embedding, output_num, len_max_seq,
+            d_word_vec=100, d_model=512, d_inner=2048,
+            n_layers=6, n_head=8, d_k=64, d_v=64, dropout=0.1):
+        super().__init__()
+
+        self.encoder = Encoder(
+            embedding=embedding,
+            len_max_seq=len_max_seq,
+            d_word_vec=d_word_vec, d_model=d_model, d_inner=d_inner,
+            n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
+            dropout=dropout)
+
+        # encoder output: [batch_size, seq_length, w2v_length]
+
+        self.tgt_word_prj = nn.Linear(len_max_seq * d_word_vec, output_num, bias=False)
+        nn.init.xavier_normal_(self.tgt_word_prj.weight)
+
+    def forward(self, src_seq, src_pos):
+        '''
+            Arguments:
+                src_seq {Tensor, shape [batch, len_max_seq]} -- word index sequence with padding
+                src_pos {Tensor, shape [batch, len_max_seq]} -- position index sequence with padding
+
+            Returns:
+                seq_logit {Tensor, shape [batch, output_num]} -- logits
+        '''
+        enc_output, *_ = self.encoder(src_seq, src_pos)
+        seq_logit = self.tgt_word_prj(enc_output.view([enc_output.size(0), -1]))
+
+        return seq_logit
