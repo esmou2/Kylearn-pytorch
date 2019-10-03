@@ -1,11 +1,13 @@
 import numpy as np
 import torch.optim as optim
+
+
 class AdamOptimizer():
     '''A simple wrapper class for learning rate scheduling'''
 
-    def __init__(self, parameters, n_warmup_steps, lr_max, betas = (0.9, 0.999)):
+    def __init__(self, parameters, n_warmup_steps, lr_max, betas=(0.9, 0.999)):
         '''lr of the first epoch: 1/exp(warmup_steps, 3/2)'''
-        self._optimizer = optim.Adam(filter(lambda x: x.requires_grad, parameters), betas)
+        self._optimizer = optim.Adam(filter(lambda x: x.requires_grad, parameters), lr=lr_max, betas=betas)
         self.n_warmup_steps = n_warmup_steps
         self.n_current_steps = 0
         # self.init_lr = np.power(d_model, -0.5)
