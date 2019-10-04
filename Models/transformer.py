@@ -180,19 +180,20 @@ class TransformerModel(Model):
 
 
 class TransformerClsModel(TransformerModel):
-    def __init__(self, save_path, log_path, embedding, len_max_seq, n_tgt_vocab,
+    def __init__(self, save_path, log_path, embedding, len_max_seq, output_dim,
                  d_word_vec=512, d_model=512, d_inner=2048,
                  n_layers=6, n_head=8, d_k=64, d_v=64, dropout=0.1,
-                 warmup_step=100, lr=0.01, is_regression=False):
+                 warmup_step=100, lr=0.01, is_regression=False, threshold=0):
 
         super().__init__(save_path, log_path)
         self.model = TransformerCls(embedding=embedding, len_max_seq=len_max_seq,
                                     d_word_vec=d_word_vec, d_model=d_model, d_inner=d_inner,
                                     n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
-                                    output_num=n_tgt_vocab, dropout=dropout)
+                                    output_num=output_dim, dropout=dropout)
 
         self.optimizer = AdamOptimizer(self.model.parameters(), warmup_step, lr_max=lr)
         self.is_regression = is_regression
+        self.threshold = threshold
 
     def train_epoch(self, training_data, device, smoothing):
         ''' Epoch operation in training phase'''
@@ -204,29 +205,30 @@ class TransformerClsModel(TransformerModel):
         n_sample_correct = 0
 
         for batch in tqdm(
-                training_data, mininterval=2,
+                training_data, mininterval=1,
                 desc='  - (Training)   ', leave=False):  # training_data should be a iterable
 
             # TODO: batch iterable
-            # # prepare data
-            # src_seq, src_pos, label= map(lambda x: x.to(device), batch)
+            # prepare data
+            index, position, target= map(lambda x: x.to(device), batch)
 
-            src_seq, src_pos, label = training_data
             # forward
             self.optimizer.zero_grad()
-            self.logits = self.model(src_seq, src_pos)
+            self.logits = self.model(index, position)
 
-            # activation
-            self.pred = nn.Sigmoid(self.logits)
+
 
             # backward
             if self.is_regression:
-                loss = self.loss_regression(self.logits, label)
-                n_correct = self.performance_regression(self.logits, label)
+                # activation
+                self.pred = nn.Sigmoid(self.logits)
+
+                loss = self.loss_regression(self.logits, target)
+                n_correct = self.performance_regression(self.logits, target, threshold=self.threshold)
 
             else:
-                loss = self.loss_cross_entropy(self.logits, label, smoothing)
-                n_correct = self.performance_multi(self.logits, label)
+                loss = self.loss_cross_entropy(self.logits, target, smoothing)
+                n_correct = self.performance_multi(self.logits, target)
 
             loss.backward()
 
@@ -236,7 +238,7 @@ class TransformerClsModel(TransformerModel):
             # note keeping
             total_loss += loss.item()
 
-            non_pad_mask = label.ne(0)
+            non_pad_mask = target.ne(0)
             n_sample = non_pad_mask.sum().item()
             n_sample_total += n_sample
             n_sample_correct += n_correct
@@ -255,34 +257,32 @@ class TransformerClsModel(TransformerModel):
         n_sample_correct = 0
 
         with torch.no_grad():
-            for batch in tqdm(
-                    validation_data, mininterval=2,
-                    desc='  - (Validation) ', leave=False):
-                # prepare data
-                src_seq, src_pos, label = map(lambda x: x.to(device), batch)
 
-                # forward
-                pred = self.model(src_seq, src_pos)
+            # prepare data
+            index, position, target = map(lambda x: x.to(device), validation_data)
 
-                if self.is_regression:
-                    loss = self.loss_regression(self.logits, label)
-                    n_correct = self.performance_regression(self.logits, label)
+            # forward
+            logits = self.model(index, position)
 
-                else:
-                    loss = self.loss_cross_entropy(self.logits, label)
-                    n_correct = self.performance_multi(self.logits, label)
+            if self.is_regression:
+                loss = self.loss_regression(logits, target)
+                n_correct = self.performance_regression(logits, target, threshold=self.threshold)
 
-                # note keeping
-                total_loss += loss.item()
+            else:
+                loss = self.loss_cross_entropy(logits, target)
+                n_correct = self.performance_multi(logits, target)
 
-                # note keeping
-                total_loss += loss.item()
+            # note keeping
+            total_loss += loss.item()
 
-                non_pad_mask = label.ne(0)
-                n_sample = non_pad_mask.sum().item()
-                n_sample_total += n_sample
-                n_sample_correct += n_correct
+            # note keeping
+            total_loss += loss.item()
 
-            loss_per_word = total_loss / n_sample_total
-            accuracy = n_sample_correct / n_sample_total
-            return loss_per_word, accuracy
+            non_pad_mask = target.ne(0)
+            n_sample = non_pad_mask.sum().item()
+            n_sample_total += n_sample
+            n_sample_correct += n_correct
+
+        loss_per_word = total_loss / n_sample_total
+        accuracy = n_sample_correct / n_sample_total
+        return loss_per_word, accuracy
