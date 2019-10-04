@@ -15,8 +15,8 @@ def padding_data(data, max_length, padding_value):
         '''padding the lists to the same length'''
         seq_length = len(example)
         return np.pad(example, (0, max_length - seq_length), constant_values=padding_value)
-
     data = data.map(padding)
-    data = np.concatenate(data).reshape(-1, max_length) # Squeeze the lists to one list, and reshape
+    data = np.concatenate(data.values)
+    data = data.reshape(-1, max_length) # Squeeze the lists to one list, and reshape
 
     return data
