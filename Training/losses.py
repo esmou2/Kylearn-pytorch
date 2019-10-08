@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 
-def loss_cross_entropy(logits, real, smoothing=False):
+def cross_entropy_loss(logits, real, smoothing=False):
     ''' Calculate cross entropy loss, apply label smoothing if needed. '''
 
     real = real.contiguous().view(-1)
@@ -19,5 +19,12 @@ def loss_cross_entropy(logits, real, smoothing=False):
         loss = loss.masked_select(non_pad_mask).sum()  # average later
     else:
         loss = F.cross_entropy(logits, real, ignore_index=0, reduction='sum')
+
+    return loss
+
+
+def mse_loss(logits, real):
+    z = F.sigmoid(logits)
+    loss = F.mse_loss(z, real)
 
     return loss

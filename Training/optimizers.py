@@ -1,13 +1,13 @@
 import numpy as np
-import torch.optim as optim
+from torch.optim.adam import Adam
 
 
-class AdamOptimizer():
+class AdamOptimizer(Adam):
     '''A simple wrapper class for learning rate scheduling'''
 
     def __init__(self, parameters, n_warmup_steps, lr_max, betas=(0.9, 0.999)):
         '''lr of the first epoch: 1/exp(warmup_steps, 3/2)'''
-        self._optimizer = optim.Adam(filter(lambda x: x.requires_grad, parameters), lr=lr_max, betas=betas)
+        super(AdamOptimizer, self).__init__(filter(lambda x: x.requires_grad, parameters), lr=lr_max, betas=betas)
         self.n_warmup_steps = n_warmup_steps
         self.n_current_steps = 0
         # self.init_lr = np.power(d_model, -0.5)
@@ -16,11 +16,11 @@ class AdamOptimizer():
     def step(self):
         "Step with the inner optimizer"
         self._update_learning_rate()
-        self._optimizer.step()
+        super().step()
 
     def zero_grad(self):
         "Zero out the gradients by the inner optimizer"
-        self._optimizer.zero_grad()
+        super().zero_grad()
 
     def _get_lr_scale(self):
         '''
@@ -38,8 +38,8 @@ class AdamOptimizer():
         self.n_current_steps += 1
         lr = self.init_lr * self._get_lr_scale()
 
-        for param_group in self._optimizer.param_groups:
+        for param_group in super().param_groups:
             param_group['lr'] = lr
 
     def state_dict(self):
-        return self._optimizer.state_dict()
+        return super().state_dict()
