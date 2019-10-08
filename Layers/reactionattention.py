@@ -3,13 +3,31 @@ import torch.nn as nn
 import numpy as np
 
 
+class ReduceParamLinear(nn.Module):
+    def __init__(self, d_in, d_out):
+        super().__init__()
+        d_hid = int(np.round(np.sqrt(d_in)))
+        self.layer1 = nn.Linear(d_in, d_hid)
+        self.layer2 = nn.Linear(d_hid, d_out)
+
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.layer2(x)
+        return x
+
+    def initialize_param(self, init, *args):
+        init(self.layer1.weight, *args)
+        init(self.layer2.weight, *args)
+
+
+
 class BottleneckLayer(nn.Module):
     ''' Bottleneck Layer '''
 
     def __init__(self, d_in, d_hid, d_out=None, dropout=0.1):
         super().__init__()
         if d_out == None:
-            d_out=d_in
+            d_out = d_in
 
         self.encode = nn.Linear(d_in, d_hid)
         self.decode = nn.Linear(d_hid, d_out)
@@ -25,7 +43,7 @@ class BottleneckLayer(nn.Module):
         '''
         residual = x
         encode = nn.functional.relu(self.encode(x))
-        decode = self.w_2(encode)
+        decode = self.decode(encode)
         output = self.dropout(decode)
         output = self.layer_norm(output + residual)
         return output
@@ -66,17 +84,18 @@ class ReactionAttentionLayer(nn.Module):
     '''Reaction Attention'''
 
     def __init__(self, n_head, d_reactant, d_f1, d_f2, d_hid=256, dropout=0.1, use_bottleneck=True):
+        # d_reactant should be less than 2*sqrt(d_f1)
         super().__init__()
         self.d_f1 = d_f1
         self.d_f2 = d_f2
         self.n_head = n_head
         self.d_reactant = d_reactant
         self.use_bottleneck = use_bottleneck
-        self.expansion = nn.Linear(d_f1, n_head * d_f1 * d_reactant)
+        self.expansion = ReduceParamLinear(d_f1, n_head * d_f1 * d_reactant)
         self.reactant = nn.Linear(d_f2, n_head * d_reactant)
         self.value = nn.Linear(d_f1, n_head * d_f1)
 
-        nn.init.kaiming_normal(self.expansion.weight)
+        self.expansion.initialize_param(nn.init.kaiming_normal)
         nn.init.kaiming_normal(self.reactant.weight)
         nn.init.kaiming_normal(self.value.weight)
 
@@ -113,7 +132,7 @@ class ReactionAttentionLayer(nn.Module):
         value = self.value(feature_1).view(batch_size, 1, n_head, d_f1)
 
         expansion = expansion.permute(2, 0, 1, 3).contiguous().view(-1, d_f1, d_reactant)
-        reactant = reactant.premute(2, 0, 3, 1).contiguous().view(-1, d_reactant, 1)
+        reactant = reactant.permute(2, 0, 3, 1).contiguous().view(-1, d_reactant, 1)
         value = value.permute(2, 0, 3, 1).contiguous().view(-1, d_f1, 1)
 
         output, attn = self.attention(expansion, reactant, value)
@@ -171,13 +190,13 @@ class SelfAttentionLayer(nn.Module):
         self.d_reactant = d_reactant
         self.use_bottleneck = use_bottleneck
 
-        self.query = nn.Linear(d_f1, n_head * d_f1 * d_reactant)
-        self.key = nn.Linear(d_f1, n_head * d_f1 * d_reactant)
-        self.value = nn.Linear(d_f1, n_head * d_f1)
+        self.query = ReduceParamLinear(d_f1, n_head * d_f1 * d_reactant)
+        self.key = ReduceParamLinear(d_f1, n_head * d_f1 * d_reactant)
+        self.value = ReduceParamLinear(d_f1, n_head * d_f1)
 
-        nn.init.kaiming_normal(self.query.weight)
-        nn.init.kaiming_normal(self.key.weight)
-        nn.init.kaiming_normal(self.value.weight)
+        self.query.initialize_param(nn.init.kaiming_normal)
+        self.key.initialize_param(nn.init.kaiming_normal)
+        self.value.initialize_param(nn.init.kaiming_normal)
 
         self.attention = ScaledDotProduction(temperature=np.power(d_reactant, 0.5))
 
