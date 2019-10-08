@@ -38,7 +38,7 @@ class AdamOptimizer(Adam):
         self.n_current_steps += 1
         lr = self.init_lr * self._get_lr_scale()
 
-        for param_group in super().param_groups:
+        for param_group in self.param_groups:
             param_group['lr'] = lr
 
     def state_dict(self):
