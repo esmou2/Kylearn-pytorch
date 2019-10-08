@@ -1,6 +1,6 @@
 from framework.model import Model
-from Modules.transformer import Transformer, TransformerCls
-from Optimizer.adam import AdamOptimizer
+from Modules.transformer import TransformerCls
+from Training.optimizers import AdamOptimizer
 import torch.nn as nn
 import torch
 import torch.nn.functional as F

@@ -1,6 +1,6 @@
 import torch
 import pandas as pd
-from utils.word2vec import get_embeddings
+from utils.embeddings import get_embeddings
 from Models.transformer import TransformerClsModel
 from Dataloader.transformer import TransformerClsDataset, TransformerClsDataLoader
 
@@ -20,3 +20,4 @@ model.train(training_data=data_loader.loader,
             validation_data=dataset.eval_set,
             epoch=10, device=device, smoothing=True, save_mode='all')
 
+torch.nn.Conv1d
