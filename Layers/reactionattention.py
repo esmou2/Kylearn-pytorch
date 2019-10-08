@@ -76,9 +76,9 @@ class ReactionAttentionLayer(nn.Module):
         self.reactant = nn.Linear(d_f2, n_head * d_reactant)
         self.value = nn.Linear(d_f1, n_head * d_f1)
 
-        nn.init.kaiming_normal(self.expansion.weight, mean=0, std=np.sqrt(2.0 / (d_f1 + d_reactant)))
-        nn.init.kaiming_normal(self.reactant.weight, mean=0, std=np.sqrt(2.0 / (d_f1 + d_reactant)))
-        nn.init.kaiming_normal(self.value.weight, mean=0, std=np.sqrt(2.0 / (d_f1 + d_reactant)))
+        nn.init.kaiming_normal(self.expansion.weight)
+        nn.init.kaiming_normal(self.reactant.weight)
+        nn.init.kaiming_normal(self.value.weight)
 
         self.attention = ReactionDotProduction(temperature=np.power(d_reactant, 0.5))
 
@@ -175,9 +175,9 @@ class SelfAttentionLayer(nn.Module):
         self.key = nn.Linear(d_f1, n_head * d_f1 * d_reactant)
         self.value = nn.Linear(d_f1, n_head * d_f1)
 
-        nn.init.kaiming_normal(self.query.weight, mean=0, std=np.sqrt(2.0 / (d_f1 + d_reactant)))
-        nn.init.kaiming_normal(self.key.weight, mean=0, std=np.sqrt(2.0 / (d_f1 + d_reactant)))
-        nn.init.kaiming_normal(self.value.weight, mean=0, std=np.sqrt(2.0 / (d_f1 + d_reactant)))
+        nn.init.kaiming_normal(self.query.weight)
+        nn.init.kaiming_normal(self.key.weight)
+        nn.init.kaiming_normal(self.value.weight)
 
         self.attention = ScaledDotProduction(temperature=np.power(d_reactant, 0.5))
 
