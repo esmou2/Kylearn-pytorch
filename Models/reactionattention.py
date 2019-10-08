@@ -22,7 +22,7 @@ class ReactionModel(pl.LightningModule):
 
     def forward(self, feature_1, feature_2):
         output = self.model(feature_1, feature_2)
-        output = self.fc1(output)
+        output = self.fc1(output[0])
         output = nn.functional.relu(output)
         output = self.fc2(output)
         return output
@@ -30,15 +30,16 @@ class ReactionModel(pl.LightningModule):
     def training_step(self, batch, batch_nb):
         feature_1, feature_2, y = batch
         logits = self.forward(feature_1, feature_2)
+        pred = logits.sigmoid()
+
 
         if y.shape[-1] == 1:
-            loss = mse_loss(logits, y)
+            loss = mse_loss(pred, y)
 
         else:
-            loss = cross_entropy_loss(logits, y, smoothing=True)
+            loss = cross_entropy_loss(pred, y, smoothing=True)
 
-        pred = logits.sigmoid()
-        acc = accuracy(pred, y)
+        acc = accuracy(pred, y, threshold=self.threshold)
         _, _, precision_avg, recall_avg = precision_racall(pred, y, threshold=self.threshold)
         tensorboard_logs = {'train_loss': loss, 'train_acc': acc,
                             'train_precision': precision_avg,
@@ -49,15 +50,15 @@ class ReactionModel(pl.LightningModule):
     def validation_step(self, batch, batch_nb):
         feature_1, feature_2, y = batch
         logits = self.forward(feature_1, feature_2)
+        pred = logits.sigmoid()
 
         if y.shape[-1] == 1:
-            loss = mse_loss(logits, y)
+            loss = mse_loss(pred, y)
 
         else:
-            loss = cross_entropy_loss(logits, y, smoothing=False)
+            loss = cross_entropy_loss(pred, y, smoothing=False)
 
-        pred = logits.sigmoid()
-        acc = accuracy(pred, y)
+        acc = accuracy(pred, y, threshold=self.threshold)
         _, _, precision_avg, recall_avg = precision_racall(pred, y, threshold=self.threshold)
 
         return {'val_loss': loss, 'val_acc': acc,
