@@ -24,16 +24,15 @@ def performance_regression(logits, real, threshold):
     return n_correct
 
 
-def accuracy(pred, real):
-    n = real.shape[0]
-    pred = pred.argmax(dim=-1).view(n, -1)
-    real = real.view(n, -1)
-    return (pred == real).float().mean()
+def accuracy(pred, real, threshold=None):
+    if threshold==None:
+        n = real.shape[0]
+        pred = pred.argmax(dim=-1).view(n, -1)
+        real = real.view(n, -1)
+        return (pred == real).float().mean()
+    else:
+        return ((pred > threshold).byte() == real.byte()).float().mean()
 
-
-def accuracy_threshold(logits, real, threshold=0.5):
-    logits = logits.sigmoid()
-    return ((logits > threshold).byte() == real.byte()).float().mean()
 
 
 def confusion_matrix(pred, real, threshold=None):
@@ -67,14 +66,15 @@ def precision_racall(pred, real, threshold=None, average='macro'):
             pred = one_hot_embedding(pred, real.max(-1))
             real = one_hot_embedding(real, real.max(-1))
 
-    tp = (pred & real).sum(0).float()
-    fp = (pred - tp).sum(0).float()
-    fn = (real - tp).sum(0).float()
-    precision = tp / (tp + fp)
-    recall = tp / (tp + fn)
+    tp = (pred & real)
+    tp_count = tp.sum(0).float()
+    fp_count = (pred - tp).sum(0).float()
+    fn_count = (real - tp).sum(0).float()
+    precision = tp_count / (tp_count + fp_count)
+    recall = tp_count / (tp_count + fn_count)
 
     if threshold != None:
-        return precision[0], threshold[0], precision[0], threshold[0]
+        return precision[1], recall[1], precision[1], recall[1]
 
     else:
         if average == 'macro':
