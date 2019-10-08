@@ -28,7 +28,7 @@ class EncoderLayer(nn.Module):
         enc_output = self.pos_ffn(enc_output) # wider the network
         enc_output *= non_pad_mask
 
-        # enc_output:       [batch_size, seq_length, w2v_length]
+        # enc_output:       [batch_size, seq_length, d_v]
         # non_pad_mask:     [n_head, seq_length, 1]
         # slf_attn_mask:    [batch_size, seq_length, seq_length]
         return enc_output, encoder_self_attn

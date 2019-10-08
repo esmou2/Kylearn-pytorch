@@ -20,3 +20,8 @@ def get_embeddings(model_path, padding = False):
         embedding = torch.cat([empty_embedding, embedding])
 
     return embedding, vector_length
+
+def one_hot_embedding(index, num_classes):
+    diag = torch.eye(num_classes).byte()
+    index = index.view(-1).tolist()
+    return diag[index]
