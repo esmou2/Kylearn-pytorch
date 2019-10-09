@@ -1,4 +1,5 @@
 from Training.optimizers import AdamOptimizer
+from torch.optim.adam import Adam
 from Training.losses import *
 from Training.evaluation import accuracy, precision_racall
 import torch.nn as nn
@@ -78,7 +79,8 @@ class ReactionModel(pl.LightningModule):
         return {'avg_val_loss': avg_loss, 'log': tensorboard_logs}
 
     def configure_optimizers(self):
-        return AdamOptimizer(self.parameters(), 1000, 0.01)
+        # return AdamOptimizer(self.parameters(), 1000, 0.01)
+        return Adam(self.parameters(), lr=0.005, betas=(0.9, 0.999))
 
     @pl.data_loader
     def train_dataloader(self):
