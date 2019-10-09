@@ -1,12 +1,13 @@
 from Training.optimizers import AdamOptimizer
 from Training.losses import *
 from Training.evaluation import accuracy, precision_racall
+from framework.model import Model
 import torch.nn as nn
 
 import pytorch_lightning as pl
 
 
-class ReactionModel(pl.LightningModule):
+class ReactionModelLightning(pl.LightningModule):
     def __init__(self, dataloader, stack, d_reactant, d_bottleneck, d_classifier, d_output, threshold=None,
                  n_layers=6, n_head=8, dropout=0.1):
         super().__init__()
@@ -93,144 +94,147 @@ class ReactionModel(pl.LightningModule):
         return self.dataloader.test_dataloader()
 
 
-# class ReactionModel_(Model):
-#     def __init__(self, save_path, log_path, feature1_dim, feature2_dim, d_reactant, d_bottleneck,
-#                  n_layers=6, n_head=8, dropout=0.1,
-#                  warmup_step=100, lr=0.01, is_regression=False, threshold=0):
-#
-#         super().__init__(save_path)
-#
-#         self.model = ReactionAttentionStack(n_layers, n_head, feature1_dim, feature2_dim, d_reactant, d_bottleneck,
-#                                             dropout)
-#
-#         self.optimizer = AdamOptimizer(self.model.parameters(), warmup_step, lr_max=lr)
-#         self.is_regression = is_regression
-#         self.threshold = threshold
-#
-#         self._logger_train = logger(log_path + 'train')
-#         self._logger_eval = logger(log_path + 'test')
-#
-#     def train_epoch(self, training_data, device, smoothing):
-#         ''' Epoch operation in training phase'''
-#
-#         self.model.train()
-#
-#         total_loss = 0
-#         n_sample_total = 0
-#         n_sample_correct = 0
-#
-#         for batch in tqdm(
-#                 training_data, mininterval=1,
-#                 desc='  - (Training)   ', leave=False):  # training_data should be a iterable
-#
-#             # TODO: batch iterable
-#             # prepare data
-#             index, position, target = map(lambda x: x.to(device), batch)
-#
-#             # forward
-#             self.optimizer.zero_grad()
-#             self.logits = self.model(index, position)
-#
-#             # backward
-#             if self.is_regression:
-#                 # activation
-#                 self.pred = nn.Sigmoid(self.logits)
-#
-#                 loss = self.loss_regression(self.logits, target)
-#                 n_correct = self.performance_regression(self.logits, target, threshold=self.threshold)
-#
-#             else:
-#                 loss = self.loss_cross_entropy(self.logits, target, smoothing)
-#                 n_correct = self.performance_multi(self.logits, target)
-#
-#             loss.backward()
-#
-#             # update parameters
-#             self.optimizer.step()
-#
-#             # note keeping
-#             total_loss += loss.item()
-#
-#             non_pad_mask = target.ne(0)
-#             n_sample = non_pad_mask.sum().item()
-#             n_sample_total += n_sample
-#             n_sample_correct += n_correct
-#
-#         loss_per_word = total_loss / n_sample_total
-#         accuracy = n_sample_correct / n_sample_total
-#         return loss_per_word, accuracy
-#
-#     def eval_epoch(self, validation_data, device):
-#         ''' Epoch operation in evaluation phase '''
-#
-#         self.model.eval()
-#
-#         total_loss = 0
-#         n_sample_total = 0
-#         n_sample_correct = 0
-#
-#         with torch.no_grad():
-#
-#             # prepare data
-#             index, position, target = map(lambda x: x.to(device), validation_data)
-#
-#             # forward
-#             logits = self.model(index, position)
-#
-#             if self.is_regression:
-#                 loss = self.loss_regression(logits, target)
-#                 n_correct = self.performance_regression(logits, target, threshold=self.threshold)
-#
-#             else:
-#                 loss = self.loss_cross_entropy(logits, target)
-#                 n_correct = self.performance_multi(logits, target)
-#
-#             # note keeping
-#             total_loss += loss.item()
-#
-#             # note keeping
-#             total_loss += loss.item()
-#
-#             non_pad_mask = target.ne(0)
-#             n_sample = non_pad_mask.sum().item()
-#             n_sample_total += n_sample
-#             n_sample_correct += n_correct
-#
-#         loss_per_word = total_loss / n_sample_total
-#         accuracy = n_sample_correct / n_sample_total
-#         return loss_per_word, accuracy
-#
-#     def train(self, training_data, validation_data, epoch, device, smoothing, save_mode):
-#         assert save_mode in ['all', 'best']
-#         valid_losses = []
-#         for epoch_i in range(epoch):
-#             print('[ Epoch', epoch_i, ']')
-#
-#             start = time.time()
-#             train_loss, train_accu = self.train_epoch(training_data, device, smoothing=smoothing)
-#             self._logger_train.info('  - (Training)   ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %, ' \
-#                                     'elapse: {elapse:3.3f} min'.format(
-#                 ppl=math.exp(min(train_loss, 100)), accu=100 * train_accu,
-#                 elapse=(time.time() - start) / 60))
-#
-#             start = time.time()
-#             valid_loss, valid_accu = self.eval_epoch(validation_data, device)
-#             self._logger_eval.info('  - (Validation) ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %, ' \
-#                                    'elapse: {elapse:3.3f} min'.format(
-#                 ppl=math.exp(min(valid_loss, 100)), accu=100 * valid_accu,
-#                 elapse=(time.time() - start) / 60))
-#
-#             valid_losses += [valid_loss]
-#
-#             checkpoint = {
-#                 'models': self.model.state_dict(),
-#                 'optimizer_state_dict': self.optimizer.state_dict(),
-#                 'epoch': epoch_i}
-#
-#             if save_mode == 'all':
-#                 self.save_model(checkpoint, self.save_path + '_loss_{loss:3.3f}.chkpt'.format(loss=valid_loss))
-#
-#             if save_mode == 'best':
-#                 if valid_loss >= max(valid_loss):
-#                     self.save_model(checkpoint, self.save_path + '_loss_{loss:3.3f}.chkpt'.format(loss=valid_loss))
-#                     print('    - [Info] The checkpoint file has been updated.')
+class ReactionModel(Model):
+    def __init__(self, save_path, log_path, dataloader, stack, d_reactant, d_bottleneck, d_classifier, d_output, threshold=None,
+                 n_layers=6, n_head=8, dropout=0.1):
+
+        super().__init__(save_path)
+
+        self.dataloader = dataloader
+        feature1_dim, feature2_dim = self.dataloader.get_feature_dim()
+
+        self.model = stack(n_layers, n_head, feature1_dim, feature2_dim, d_reactant, d_bottleneck,
+                           dropout)
+
+        self.fc1 = nn.Linear(feature1_dim, d_classifier)
+        self.fc2 = nn.Linear(d_classifier, d_output)
+
+        self.threshold = threshold
+
+        self._logger_train = logger(log_path + 'train')
+        self._logger_eval = logger(log_path + 'test')
+
+    def train_epoch(self, training_data, device, smoothing):
+        ''' Epoch operation in training phase'''
+
+        self.model.train()
+
+        total_loss = 0
+        n_sample_total = 0
+        n_sample_correct = 0
+
+        for batch in tqdm(
+                training_data, mininterval=1,
+                desc='  - (Training)   ', leave=False):  # training_data should be a iterable
+
+            # TODO: batch iterable
+            # prepare data
+            index, position, target = map(lambda x: x.to(device), batch)
+
+            # forward
+            self.optimizer.zero_grad()
+            self.logits = self.model(index, position)
+
+            # backward
+            if self.is_regression:
+                # activation
+                self.pred = nn.Sigmoid(self.logits)
+
+                loss = self.loss_regression(self.logits, target)
+                n_correct = self.performance_regression(self.logits, target, threshold=self.threshold)
+
+            else:
+                loss = self.loss_cross_entropy(self.logits, target, smoothing)
+                n_correct = self.performance_multi(self.logits, target)
+
+            loss.backward()
+
+            # update parameters
+            self.optimizer.step()
+
+            # note keeping
+            total_loss += loss.item()
+
+            non_pad_mask = target.ne(0)
+            n_sample = non_pad_mask.sum().item()
+            n_sample_total += n_sample
+            n_sample_correct += n_correct
+
+        loss_per_word = total_loss / n_sample_total
+        accuracy = n_sample_correct / n_sample_total
+        return loss_per_word, accuracy
+
+    def eval_epoch(self, validation_data, device):
+        ''' Epoch operation in evaluation phase '''
+
+        self.model.eval()
+
+        total_loss = 0
+        n_sample_total = 0
+        n_sample_correct = 0
+
+        with torch.no_grad():
+
+            # prepare data
+            index, position, target = map(lambda x: x.to(device), validation_data)
+
+            # forward
+            logits = self.model(index, position)
+
+            if self.is_regression:
+                loss = self.loss_regression(logits, target)
+                n_correct = self.performance_regression(logits, target, threshold=self.threshold)
+
+            else:
+                loss = self.loss_cross_entropy(logits, target)
+                n_correct = self.performance_multi(logits, target)
+
+            # note keeping
+            total_loss += loss.item()
+
+            # note keeping
+            total_loss += loss.item()
+
+            non_pad_mask = target.ne(0)
+            n_sample = non_pad_mask.sum().item()
+            n_sample_total += n_sample
+            n_sample_correct += n_correct
+
+        loss_per_word = total_loss / n_sample_total
+        accuracy = n_sample_correct / n_sample_total
+        return loss_per_word, accuracy
+
+    def train(self, training_data, validation_data, epoch, device, smoothing, save_mode):
+        assert save_mode in ['all', 'best']
+        valid_losses = []
+        for epoch_i in range(epoch):
+            print('[ Epoch', epoch_i, ']')
+
+            start = time.time()
+            train_loss, train_accu = self.train_epoch(training_data, device, smoothing=smoothing)
+            self._logger_train.info('  - (Training)   ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %, ' \
+                                    'elapse: {elapse:3.3f} min'.format(
+                ppl=math.exp(min(train_loss, 100)), accu=100 * train_accu,
+                elapse=(time.time() - start) / 60))
+
+            start = time.time()
+            valid_loss, valid_accu = self.eval_epoch(validation_data, device)
+            self._logger_eval.info('  - (Validation) ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %, ' \
+                                   'elapse: {elapse:3.3f} min'.format(
+                ppl=math.exp(min(valid_loss, 100)), accu=100 * valid_accu,
+                elapse=(time.time() - start) / 60))
+
+            valid_losses += [valid_loss]
+
+            checkpoint = {
+                'models': self.model.state_dict(),
+                'optimizer_state_dict': self.optimizer.state_dict(),
+                'epoch': epoch_i}
+
+            if save_mode == 'all':
+                self.save_model(checkpoint, self.save_path + '_loss_{loss:3.3f}.chkpt'.format(loss=valid_loss))
+
+            if save_mode == 'best':
+                if valid_loss >= max(valid_loss):
+                    self.save_model(checkpoint, self.save_path + '_loss_{loss:3.3f}.chkpt'.format(loss=valid_loss))
+                    print('    - [Info] The checkpoint file has been updated.')
