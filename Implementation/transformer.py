@@ -19,5 +19,3 @@ device = torch.device('cpu')  # for GPU 'cuda'
 model.train(training_data=data_loader.loader,
             validation_data=dataset.eval_set,
             epoch=10, device=device, smoothing=True, save_mode='all')
-
-torch.nn.Conv1d
