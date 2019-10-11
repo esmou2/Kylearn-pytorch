@@ -2,6 +2,7 @@ from torch.optim.adam import Adam
 from Training.losses import *
 from Training.evaluation import accuracy, precision_recall
 from Training.control import TrainingControl, EarlyStopping
+from Modules.linear import LinearClassifier
 import torch.nn as nn
 from framework.model import Model
 from tqdm import tqdm
@@ -100,21 +101,35 @@ import pytorch_lightning as pl
 
 class ReactionModel_(Model):
     def __init__(self, save_path, log_path, dataloader, optimizer, stack, d_reactant, d_bottleneck, d_classifier,
-                 d_output, threshold=None, n_layers=6, n_head=8, dropout=0.1):
+                 d_output, threshold=None, n_layers=6, n_head=8, dropout=0.1, lr=0.001):
 
         super().__init__(save_path, log_path)
+
+        device_ids = list(range(torch.cuda.device_count()))
 
         self.dataloader = dataloader
         feature1_dim, feature2_dim = self.dataloader.get_feature_dim()
         self.model = stack(n_layers, n_head, feature1_dim, feature2_dim, d_reactant, d_bottleneck,
                            dropout)
-        self.fc1 = nn.Linear(feature1_dim, d_classifier)
-        self.fc2 = nn.Linear(d_classifier, d_output)
+        self.classifier = LinearClassifier(feature1_dim, d_classifier, d_output)
+
+        if self.check_cuda():
+            # # DataParallel not working, don't know why
+            # self.model = nn.DataParallel(self.model, device_ids)
+            # self.fc1 = nn.DataParallel(self.fc1, device_ids)
+            # self.fc2 = nn.DataParallel(self.fc2, device_ids)
+            self.model.cuda()
+            self.classifier.cuda()
+
+
+
+
+        self.parameters = list(self.model.parameters()) + list(self.classifier.parameters())
 
         self.d_output = d_output
         self.threshold = threshold
 
-        self.optimizer = optimizer
+        self.optimizer = optimizer(self.parameters, lr = lr, betas=(0.9, 0.999))
 
         self.controller = TrainingControl(max_step=100000, evaluate_every_nstep=100, print_every_nstep=10)
         self.early_stopping = EarlyStopping(patience=50)
@@ -125,29 +140,32 @@ class ReactionModel_(Model):
         self.model.train()
 
         total_loss = 0
+        batch_counter = 0
+
 
         for batch in tqdm(
                 self.dataloader.train_dataloader(), mininterval=1,
                 desc='  - (Training)   ', leave=False):  # training_data should be a iterable
 
             # prepare data
-            batch_idx = batch[0]
-            feature_1, feature_2, y = map(lambda x: x.to(device), batch[1])
+            feature_1, feature_2, y = map(lambda x: x.to(device), batch)
 
             # forward
             self.optimizer.zero_grad()
             logits = self.model(feature_1, feature_2)
+            logits = logits[0].relu()
+            logits = self.classifier(logits)
 
-            pred = logits.sigmoid()
+            pred = logits
 
-            if y.shape[-1] == 1:
+            if pred.shape[-1] == 1:
                 loss = mse_loss(pred, y)
 
             else:
                 loss = cross_entropy_loss(pred, y, smoothing=smothing)
 
             acc = accuracy(pred, y, threshold=self.threshold)
-            _, _, precision_avg, recall_avg = precision_recall(pred, y, self.d_output, threshold=self.threshold)
+            precision, recall, precision_avg, recall_avg = precision_recall(pred, y, self.d_output, threshold=self.threshold)
 
             loss.backward()
 
@@ -156,13 +174,14 @@ class ReactionModel_(Model):
 
             # note keeping
             total_loss += loss.item()
+            batch_counter += 1
 
-            state_dict = self.controller(batch_idx)
+            state_dict = self.controller(batch_counter)
 
             if state_dict['step_to_print']:
                 self.train_logger.info(
                     '[TRAINING] - loss: { %3.4f },    acc: { %1.4f },    pre: { %1.4f },    rec: { %1.4f }' % (
-                        loss, acc, precision_avg, recall_avg))
+                        loss, acc, precision[1], recall[1]))
 
             if state_dict['step_to_evaluate']:
                 stop = self.val_epoch(device, state_dict['step'])
@@ -182,6 +201,9 @@ class ReactionModel_(Model):
         self.model.eval()
 
         total_loss = 0
+        total_acc = 0
+        total_pre = 0
+        total_rec = 0
         batch_counter = 0
 
         with torch.no_grad():
@@ -191,43 +213,52 @@ class ReactionModel_(Model):
                     desc='  - (Evaluation)   ', leave=False):  # training_data should be a iterable
 
                 # prepare data
-                feature_1, feature_2, y = map(lambda x: x.to(device), batch[1])
+                feature_1, feature_2, y = map(lambda x: x.to(device), batch)
 
-                logits = self.model(feature_1, feature_2)
+                logits= self.model(feature_1, feature_2)
+                logits = logits[0].relu()
+                logits = self.classifier(logits)
 
-                pred = logits.sigmoid()
+                pred = logits
 
-                if y.shape[-1] == 1:
+                if pred.shape[-1] == 1:
                     loss = mse_loss(pred, y)
 
                 else:
                     loss = cross_entropy_loss(pred, y, smoothing=False)
 
                 acc = accuracy(pred, y, threshold=self.threshold)
-                _, _, precision_avg, recall_avg = precision_recall(pred, y, self.d_output, threshold=self.threshold)
-
-                self.val_logger.info(
-                    '[EVALUATION] - loss: { %3.4f },    acc: { %1.4f },    pre: { %1.4f },    rec: { %1.4f }' % (
-                        loss, acc, precision_avg, recall_avg))
+                precision, recall, precision_avg, recall_avg = precision_recall(pred, y, self.d_output, threshold=self.threshold)
 
                 # note keeping
                 total_loss += loss.item()
+                total_acc += acc.item()
+                total_pre += precision[1].item()
+                total_rec += recall[1].item()
                 batch_counter += 1
 
+
             loss_avg = total_loss / batch_counter
+            acc_avg = total_acc / batch_counter
+            pre_avg = total_pre / batch_counter
+            rec_avg = total_rec / batch_counter
+
+            self.val_logger.info(
+                '[EVALUATION] - loss: { %3.4f },    acc: { %1.4f },    pre: { %1.4f },    rec: { %1.4f }' % (
+                        loss_avg, acc_avg, pre_avg, rec_avg))
 
             state_dict = self.early_stopping(loss_avg)
 
             if state_dict['save']:
                 checkpoint = {
-                    'models': self.model.state_dict(),
+                    'model_state_dict': self.model.state_dict(),
                     'optimizer_state_dict': self.optimizer.state_dict(),
                     'global_step': step}
-                self.save_model(checkpoint, self.save_path)
+                self.save_model(checkpoint, self.save_path +'-loss-' + str(loss_avg))
 
-            return state_dict['stop']
+            return state_dict['break']
 
-    def train(self, training_dataloader, validation_dataloader, epoch, device, smoothing, save_mode):
+    def train(self, epoch, device, smoothing, save_mode):
         assert save_mode in ['all', 'best']
         for epoch_i in range(epoch):
             print('[ Epoch', epoch_i, ']')
@@ -238,5 +269,26 @@ class ReactionModel_(Model):
             if state_dict['step_to_stop']:
                 break
 
-        print('[INFO]: Finish Training, ends with %d epoch(s), %d batches and in total %d training steps.' % (
-        state_dict['epoch'], state_dict['batch'], state_dict['step']))
+        print('[INFO]: Finish Training, ends with %d epoch(s) and %d batches, in total %d training steps.' % (
+        state_dict['epoch'] - 1, state_dict['batch'], state_dict['step']))
+
+    def predict(self, data_loader, device):
+        pred_list = []
+        real_list = []
+        for batch in tqdm(
+                data_loader,
+                desc='  - (Testing)   ', leave=False):
+            # prepare data
+            feature_1, feature_2, y = map(lambda x: x.to(device), batch)
+
+            logits = self.model(feature_1, feature_2)
+            logits = logits[0].relu()
+            logits = self.classifier(logits)
+
+            pred = logits
+            pred_list += pred.tolist()
+            real_list += y.tolist()
+
+        return pred_list, real_list
+
+
