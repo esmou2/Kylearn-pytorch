@@ -36,9 +36,10 @@ class ReactionDataloader():
         # y shape [?, 1]
 
         # Load training data
-        self.train_set = ReactionDataset(file_dir + 'X_train.npy', file_dir + 'dev_train.npy', file_dir + 'y_train.npy')
+        train_set = ReactionDataset(file_dir + 'X_train.npy', file_dir + 'dev_train.npy', file_dir + 'y_train.npy')
+        self.dims = train_set.get_feature_dim()
 
-        train_size = len(self.train_set)
+        train_size = len(train_set)
         indices = list(range(train_size))
         split = int(np.floor(val_size * train_size))
         if shuffle:
@@ -49,8 +50,8 @@ class ReactionDataloader():
         train_sampler = SubsetRandomSampler(train_indices)
         valid_sampler = SubsetRandomSampler(val_indices)
 
-        self.train_loader = DataLoader(self.train_set, batch_size, sampler=train_sampler, num_workers=4)
-        self.val_loader = DataLoader(self.train_set, batch_size, sampler=valid_sampler, num_workers=4)
+        self.train_loader = DataLoader(train_set, batch_size, sampler=train_sampler, num_workers=4)
+        self.val_loader = DataLoader(train_set, batch_size, sampler=valid_sampler, num_workers=4)
 
         # Load test data
         test_set = ReactionDataset(file_dir + 'X_test.npy', file_dir + 'dev_test.npy', file_dir + 'y_test.npy')
@@ -67,4 +68,4 @@ class ReactionDataloader():
         return self.test_loader
 
     def get_feature_dim(self):
-        return self.train_set.get_feature_dim()
+        return self.dims
