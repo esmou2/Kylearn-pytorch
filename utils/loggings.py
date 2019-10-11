@@ -1,6 +1,6 @@
 import logging
 class logger():
-    def __init__(self, log_path, level=logging.INFO, mode='a', format = "%(asctime)s - %(levelname)s: %(message)s"):
+    def __init__(self, log_path, level=logging.INFO, mode='w', format = "%(asctime)s - %(levelname)s: %(message)s"):
         self.logging = logging.getLogger()
         self.logging.setLevel(level)
         fh = logging.FileHandler(log_path, mode)
