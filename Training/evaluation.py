@@ -78,7 +78,7 @@ def precision_recall(pred, real, d_output, threshold=None, average='macro'):
     recall = tp_count / (tp_count + fn_count)
 
     if threshold != None:
-        return precision[1], recall[1], precision[1], recall[1]
+        return precision[0], recall[0], precision[0], recall[0]
 
     else:
         if average == 'macro':
