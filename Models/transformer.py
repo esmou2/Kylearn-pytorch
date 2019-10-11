@@ -13,7 +13,7 @@ from abc import abstractmethod
 
 class TransformerModel(Model):
     def __init__(self, save_path, log_path):
-        super().__init__(save_path=save_path)
+        super().__init__(save_path=save_path, log_path=log_path)
 
         self.model = None
         self.optimizer = None
