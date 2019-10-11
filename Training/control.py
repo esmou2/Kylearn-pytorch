@@ -48,7 +48,7 @@ class EarlyStopping():
     def __init__(self, patience, mode='best'):
         self.patience = patience
         self.mode = mode
-        self.best_loss = 0
+        self.best_loss = 9999
         self.waitting = 0
         self.state_dict = {
             'save': False,
@@ -77,7 +77,7 @@ class EarlyStopping():
 
         return self.state_dict
     def reset_state(self):
-        self.best_loss = 0
+        self.best_loss = 9999
         self.waitting = 0
         self.state_dict = {
             'save': False,
