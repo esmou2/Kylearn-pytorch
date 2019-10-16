@@ -58,7 +58,7 @@ def confusion_matrix(pred, real, threshold=None):
     return cm
 
 
-def precision_recall(pred, real, d_output, threshold=None, average='macro'):
+def precision_recall(pred, real, d_output, threshold=None, average='macro', eps = 1e-6):
     n = real.shape[0]
     dim = real.shape[-1]
     if dim == 1:
@@ -72,13 +72,13 @@ def precision_recall(pred, real, d_output, threshold=None, average='macro'):
 
     tp = (pred & real)
     tp_count = tp.sum(0).float()
-    fp_count = (pred - tp).sum(0).float()
-    fn_count = (real - tp).sum(0).float()
+    fp_count = (pred - tp).sum(0).float() + eps
+    fn_count = (real - tp).sum(0).float() + eps
     precision = tp_count / (tp_count + fp_count)
     recall = tp_count / (tp_count + fn_count)
 
     if threshold != None:
-        return precision[0], recall[0], precision[0], recall[0]
+        return precision, recall, precision, recall
 
     else:
         if average == 'macro':
@@ -90,3 +90,4 @@ def precision_recall(pred, real, d_output, threshold=None, average='macro'):
             recall_avg = precision_avg
 
     return precision, recall, precision_avg, recall_avg
+
