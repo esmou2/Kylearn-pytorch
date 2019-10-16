@@ -45,7 +45,8 @@ class BottleneckLayer(nn.Module):
         encode = nn.functional.relu(self.encode(x))
         decode = self.decode(encode)
         output = self.dropout(decode)
-        output = self.layer_norm(output + residual)
+        # output = self.layer_norm(output + residual)
+        output = output + residual
         return output
 
 
@@ -56,31 +57,32 @@ class ReactionDotProduction(nn.Module):
         super().__init__()
         self.temperature = temperature
         self.dropout = nn.Dropout(attn_dropout)
-        self.softmax = nn.Softmax(dim=1)
+        self.softmax = nn.Softmax(dim=2)
+        self.tanh = nn.Tanh()
 
     def forward(self, expansion, reactant, value):
         '''
             Arguments:
                 expansion {Tensor, shape [n_head * batch, d_f1, d_reactant]} -- expansion
-                reactant {Tensor, shape [n_head * batch, d_reactant, 1]} -- reactant
-                value {Tensor, shape [n_head * batch, d_f1, 1]} -- value
+                reactant {Tensor, shape [n_head * batch, 1, d_reactant]} -- reactant
+                value {Tensor, shape [n_head * batch, 1, d_f1]} -- value
 
             Returns:
-                output {Tensor, shape [n_head * batch, d_f1, 1]} -- output
-                attn {Tensor, shape [n_head * batch, d_f1, 1]} -- reaction attention
+                output {Tensor, shape [n_head * batch, 1, d_f1]} -- output
+                attn {Tensor, shape [n_head * batch, 1, d_f1]} -- reaction attention
         '''
-        attn = torch.bmm(expansion, reactant)  # [n_head * batch, d_f1, 1]
+        attn = torch.bmm(reactant, expansion.transpose(1, 2))  # [n_head * batch, 1, d_f1]
         # How should we set the temperature
-        attn = attn / self.temperature
+        # attn = attn / self.temperature
 
-        attn = self.softmax(attn)  # softmax over d_f1
+        attn = self.tanh(attn)  # softmax over d_f1
         attn = self.dropout(attn)
         output = torch.mul(attn, value)
 
         return output, attn
 
 
-class ReactionAttentionLayer(nn.Module):
+class ReactionAttentionLayerV1(nn.Module):
     '''Reaction Attention'''
 
     def __init__(self, n_head, d_reactant, d_f1, d_f2, d_hid=256, dropout=0.1, use_bottleneck=True):
@@ -89,22 +91,24 @@ class ReactionAttentionLayer(nn.Module):
         self.d_f1 = d_f1
         self.d_f2 = d_f2
         self.n_head = n_head
-        self.d_reactant = d_reactant
+        self.d_reactant = np.floor(d_reactant / n_head).astype(int)
         self.use_bottleneck = use_bottleneck
-        self.expansion = ReduceParamLinear(d_f1, n_head * d_f1 * d_reactant)
-        self.reactant = nn.Linear(d_f2, n_head * d_reactant)
-        self.value = nn.Linear(d_f1, n_head * d_f1)
+        # self.expansion = ReduceParamLinear(d_f1, n_head * d_f1 * d_reactant)
+        # self.expansion.initialize_param(nn.init.normal_, mean=0, std=np.sqrt(2.0 / (d_f1 + d_f1 * d_reactant)))
+        self.expansion = nn.Linear(d_f1, n_head * d_f1 * self.d_reactant)
+        nn.init.normal_(self.expansion.weight, mean=0, std=np.sqrt(2.0 / (d_f1 + d_f1 * self.d_reactant)))
 
-        self.expansion.initialize_param(nn.init.kaiming_normal)
-        nn.init.kaiming_normal(self.reactant.weight)
-        nn.init.kaiming_normal(self.value.weight)
+        self.reactant = nn.Linear(d_f2, n_head * self.d_reactant)
+        # self.value = nn.Linear(d_f1, n_head * d_f1)
 
-        self.attention = ReactionDotProduction(temperature=np.power(d_reactant, 0.5))
+        nn.init.normal_(self.reactant.weight, mean=0, std=np.sqrt(2.0 / (d_f2 + self.d_reactant)))
+        # nn.init.normal_(self.value.weight, mean=0, std=np.sqrt(1.0 / (d_f1)))
+        self.attention = ReactionDotProduction(temperature=np.power(self.d_reactant, 0.5))
 
         self.layer_norm = nn.LayerNorm(d_f1)
 
         self.fc = nn.Linear(n_head * d_f1, d_f1)
-        nn.init.kaiming_normal(self.fc.weight)
+        nn.init.xavier_normal_(self.fc.weight)
 
         self.dropout = nn.Dropout(dropout)
 
@@ -119,7 +123,7 @@ class ReactionAttentionLayer(nn.Module):
 
             Returns:
                 output {Tensor, shape [batch, d_f1]} -- output
-                attn {Tensor, shape [n_head * batch, d_f1, 1]} -- self attention
+                attn {Tensor, shape [n_head * batch, 1, d_f1]} -- self attention
         '''
         d_f1, d_f2, n_head, d_reactant = self.d_f1, self.d_f2, self.n_head, self.d_reactant
 
@@ -129,19 +133,21 @@ class ReactionAttentionLayer(nn.Module):
 
         expansion = self.expansion(feature_1).view(batch_size, d_f1, n_head, d_reactant)
         reactant = self.reactant(feature_2).view(batch_size, 1, n_head, d_reactant)
-        value = self.value(feature_1).view(batch_size, 1, n_head, d_f1)
+        # value = self.value(feature_1).view(batch_size, 1, n_head, d_f1)
+        value = feature_1.repeat(1, n_head).view(batch_size, 1, n_head, d_f1)
 
         expansion = expansion.permute(2, 0, 1, 3).contiguous().view(-1, d_f1, d_reactant)
-        reactant = reactant.permute(2, 0, 3, 1).contiguous().view(-1, d_reactant, 1)
-        value = value.permute(2, 0, 3, 1).contiguous().view(-1, d_f1, 1)
+        reactant = reactant.permute(2, 0, 1, 3).contiguous().view(-1, 1, d_reactant)
+        value = value.permute(2, 0, 1, 3).contiguous().view(-1, 1, d_f1)
 
         output, attn = self.attention(expansion, reactant, value)
 
-        output = output.view(n_head, batch_size, d_f1, 1)
+        output = output.view(n_head, batch_size, 1, d_f1)
         output = output.permute(1, 2, 0, 3).contiguous().view(batch_size, -1)
 
         output = self.dropout(self.fc(output))
-        output = self.layer_norm(output + residual)
+        # output = self.layer_norm(output + residual)
+        output = output + residual
 
         if self.use_bottleneck:
             output = self.bottleneck(output)
@@ -163,10 +169,10 @@ class ScaledDotProduction(nn.Module):
             Arguments:
                 query {Tensor, shape [n_head * batch, d_f1, d_reactant]} -- query
                 key {Tensor, shape [n_head * batch, d_f1, d_reactant]} -- key
-                value {Tensor, shape [n_head * batch, d_f1, 1]} -- value
+                value {Tensor, shape [n_head * batch, 1, d_f1]} -- value
 
             Returns:
-                output {Tensor, shape [n_head * batch, d_f1, 1] -- output
+                output {Tensor, shape [n_head * batch, 1, d_f1] -- output
                 attn {Tensor, shape [n_head * batch, d_f1, d_f1] -- reaction attention
         '''
         attn = torch.bmm(query, key.transpose(2, 1))  # [n_head * batch, d_f1, d_f1]
@@ -175,7 +181,7 @@ class ScaledDotProduction(nn.Module):
 
         attn = self.softmax(attn)  # softmax over d_f1
         attn = self.dropout(attn)
-        output = torch.bmm(attn, value)
+        output = torch.bmm(value, attn)
 
         return output, attn
 
@@ -194,16 +200,16 @@ class SelfAttentionLayer(nn.Module):
         self.key = ReduceParamLinear(d_f1, n_head * d_f1 * d_reactant)
         self.value = ReduceParamLinear(d_f1, n_head * d_f1)
 
-        self.query.initialize_param(nn.init.kaiming_normal)
-        self.key.initialize_param(nn.init.kaiming_normal)
-        self.value.initialize_param(nn.init.kaiming_normal)
+        self.query.initialize_param(nn.init.normal_, mean=0, std=np.sqrt(2.0 / (d_f1 + d_f1 * d_reactant)))
+        self.key.initialize_param(nn.init.normal_, mean=0, std=np.sqrt(2.0 / (d_f1 + d_f1 * d_reactant)))
+        self.value.initialize_param(nn.init.normal_, mean=0, std=np.sqrt(2.0 / (d_f1 + d_f1 * d_reactant)))
 
         self.attention = ScaledDotProduction(temperature=np.power(d_reactant, 0.5))
 
         self.layer_norm = nn.LayerNorm(d_f1)
 
         self.fc = nn.Linear(n_head * d_f1, d_f1)
-        nn.init.kaiming_normal(self.fc.weight)
+        nn.init.xavier_normal(self.fc.weight)
 
         self.dropout = nn.Dropout(dropout)
 
@@ -231,11 +237,11 @@ class SelfAttentionLayer(nn.Module):
 
         query = query.permute(2, 0, 1, 3).contiguous().view(-1, d_f1, d_reactant)
         key = key.premute(2, 0, 1, 3).contiguous().view(-1, d_f1, d_reactant)
-        value = value.permute(2, 0, 3, 1).contiguous().view(-1, d_f1, 1)
+        value = value.permute(2, 0, 1, 3).contiguous().view(-1, 1, d_f1)
 
         output, attn = self.attention(query, key, value)
 
-        output = output.view(n_head, batch_size, d_f1, 1)
+        output = output.view(n_head, batch_size, 1, d_f1)
         output = output.permute(1, 2, 0, 3).contiguous().view(batch_size, -1)
 
         output = self.dropout(self.fc(output))
