@@ -1,6 +1,7 @@
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.sampler import SubsetRandomSampler
+from Dataloader.samplers import BalanceSampler
 import numpy as np
 
 
@@ -47,7 +48,8 @@ class ReactionDataloader():
             np.random.shuffle(indices)
         train_indices, val_indices = indices[split:], indices[:split]
 
-        train_sampler = SubsetRandomSampler(train_indices)
+        # train_sampler = SubsetRandomSampler(train_indices)
+        train_sampler = BalanceSampler(train_set.y, train_indices)
         valid_sampler = SubsetRandomSampler(val_indices)
 
         self.train_loader = DataLoader(train_set, batch_size, sampler=train_sampler, num_workers=4)
