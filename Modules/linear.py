@@ -9,6 +9,9 @@ class LinearClassifier(nn.Module):
         self.activation = nn.LeakyReLU()
         self.fc2 = nn.Linear(d_hid, d_out)
 
+        nn.init.xavier_normal_(self.fc1.weight)
+        nn.init.xavier_normal_(self.fc2.weight)
+
     def forward(self, x):
         x = self.fc1(x)
         x = self.activation(x)

@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from Layers.reactionattention import ReactionAttentionLayer, SelfAttentionLayer, BottleneckLayer
+from Layers.reactionattention import ReactionAttentionLayerV1, SelfAttentionLayer, BottleneckLayer
 
 
 class ReactionAttentionStack(nn.Module):
@@ -11,7 +11,7 @@ class ReactionAttentionStack(nn.Module):
             self, n_layers, n_head, d_f1, d_f2, d_reactant, d_hid=256, dropout=0.1):
         super().__init__()
         self.layer_stack = nn.ModuleList([
-            ReactionAttentionLayer(n_head, d_reactant, d_f1, d_f2, d_hid=d_hid, dropout=dropout)
+            ReactionAttentionLayerV1(n_head, d_reactant, d_f1, d_f2, d_hid=d_hid, dropout=dropout)
             for _ in range(n_layers)])
 
     def forward(self, feature_1, feature_2, return_attns=False):
@@ -61,7 +61,7 @@ class AlternateStack(nn.Module):
             self, n_layers, n_head, d_f1, d_f2, d_reactant, d_hid=256, dropout=0.1):
         super().__init__()
         self.layer_stack = nn.ModuleList([
-            ReactionAttentionLayer(n_head, d_reactant, d_f1, d_f2, d_hid=d_hid, dropout=dropout) if i % 2 == 0
+            ReactionAttentionLayerV1(n_head, d_reactant, d_f1, d_f2, d_hid=d_hid, dropout=dropout) if i % 2 == 0
             else SelfAttentionLayer(n_head, d_reactant, d_f1, d_hid=d_hid, dropout=dropout)
             for i in range(n_layers)])
 
@@ -89,7 +89,7 @@ class ParallelStack(nn.Module):
         self.n_layers = n_layers
 
         self.ra_stack = nn.ModuleList([
-            ReactionAttentionLayer(n_head, d_reactant, d_f1, d_f2, dropout=dropout, use_bottleneck=False)
+            ReactionAttentionLayerV1(n_head, d_reactant, d_f1, d_f2, dropout=dropout, use_bottleneck=False)
             for _ in range(n_layers)])
 
         self.sa_stack = nn.ModuleList([
