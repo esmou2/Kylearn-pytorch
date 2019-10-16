@@ -6,6 +6,8 @@ from Modules.linear import LinearClassifier
 import torch.nn as nn
 from framework.model import Model
 from tqdm import tqdm
+from utils.plot_curves import precision_recall as pr
+from utils.plot_curves import plot_pr_curve
 
 import pytorch_lightning as pl
 
@@ -105,13 +107,18 @@ class ReactionModel_(Model):
 
         super().__init__(save_path, log_path)
 
+        self.train_logger = None
+
         device_ids = list(range(torch.cuda.device_count()))
 
         self.dataloader = dataloader
         feature1_dim, feature2_dim = self.dataloader.get_feature_dim()
         self.model = stack(n_layers, n_head, feature1_dim, feature2_dim, d_reactant, d_bottleneck,
                            dropout)
-        self.classifier = LinearClassifier(feature1_dim, d_classifier, d_output)
+
+        # self.classifier = LinearClassifier(feature1_dim, d_classifier, d_output)
+        self.classifier = nn.Linear(feature1_dim, d_output, bias=False)
+        nn.init.xavier_normal_(self.classifier.weight)
 
         if self.check_cuda():
             # # DataParallel not working, don't know why
@@ -137,7 +144,11 @@ class ReactionModel_(Model):
     def train_epoch(self, device, smothing):
         ''' Epoch operation in training phase'''
 
+        if self.train_logger == None:
+            self.set_logger()
+
         self.model.train()
+        self.classifier.train()
 
         total_loss = 0
         batch_counter = 0
@@ -149,19 +160,19 @@ class ReactionModel_(Model):
 
             # prepare data
             feature_1, feature_2, y = map(lambda x: x.to(device), batch)
-
             # forward
             self.optimizer.zero_grad()
             logits = self.model(feature_1, feature_2)
-            logits = logits[0].relu()
-            logits = self.classifier(logits)
+            logits = self.classifier(logits[0])
 
-            pred = logits
 
-            if pred.shape[-1] == 1:
+
+            if logits.shape[-1] == 1:
+                pred = logits.sigmoid()
                 loss = mse_loss(pred, y)
 
             else:
+                pred = logits
                 loss = cross_entropy_loss(pred, y, smoothing=smothing)
 
             acc = accuracy(pred, y, threshold=self.threshold)
@@ -199,43 +210,54 @@ class ReactionModel_(Model):
         ''' Epoch operation in evaluation phase '''
 
         self.model.eval()
+        self.classifier.eval()
+
 
         total_loss = 0
         total_acc = 0
         total_pre = 0
         total_rec = 0
         batch_counter = 0
+        pred_list = []
+        real_list = []
 
         with torch.no_grad():
 
             for batch in tqdm(
-                    self.dataloader.val_dataloader(), mininterval=1,
+                    self.dataloader.val_dataloader(), mininterval=5,
                     desc='  - (Evaluation)   ', leave=False):  # training_data should be a iterable
 
                 # prepare data
                 feature_1, feature_2, y = map(lambda x: x.to(device), batch)
 
                 logits= self.model(feature_1, feature_2)
-                logits = logits[0].relu()
-                logits = self.classifier(logits)
+                logits = self.classifier(logits[0])
 
-                pred = logits
-
-                if pred.shape[-1] == 1:
+                if logits.shape[-1] == 1:
+                    pred = logits.sigmoid()
                     loss = mse_loss(pred, y)
 
                 else:
+                    pred = logits
                     loss = cross_entropy_loss(pred, y, smoothing=False)
 
                 acc = accuracy(pred, y, threshold=self.threshold)
-                precision, recall, precision_avg, recall_avg = precision_recall(pred, y, self.d_output, threshold=self.threshold)
+                precision, recall, _, _ = precision_recall(pred, y, self.d_output, threshold=self.threshold)
 
                 # note keeping
                 total_loss += loss.item()
                 total_acc += acc.item()
                 total_pre += precision[1].item()
                 total_rec += recall[1].item()
+
+                pred_list += pred.tolist()
+                real_list += y.tolist()
+
+
                 batch_counter += 1
+
+            area, precisions, recalls, thresholds = pr(pred_list, real_list)
+            plot_pr_curve(recalls, precisions, auc=area)
 
 
             loss_avg = total_loss / batch_counter
@@ -243,7 +265,7 @@ class ReactionModel_(Model):
             pre_avg = total_pre / batch_counter
             rec_avg = total_rec / batch_counter
 
-            self.val_logger.info(
+            self.train_logger.info(
                 '[EVALUATION] - loss: { %3.4f },    acc: { %1.4f },    pre: { %1.4f },    rec: { %1.4f }' % (
                         loss_avg, acc_avg, pre_avg, rec_avg))
 
@@ -275,19 +297,28 @@ class ReactionModel_(Model):
     def predict(self, data_loader, device):
         pred_list = []
         real_list = []
-        for batch in tqdm(
-                data_loader,
-                desc='  - (Testing)   ', leave=False):
-            # prepare data
-            feature_1, feature_2, y = map(lambda x: x.to(device), batch)
 
-            logits = self.model(feature_1, feature_2)
-            logits = logits[0].relu()
-            logits = self.classifier(logits)
+        self.model.eval()
+        self.classifier.eval()
 
-            pred = logits
-            pred_list += pred.tolist()
-            real_list += y.tolist()
+        with torch.no_grad():
+            for batch in tqdm(
+                    data_loader,
+                    desc='  - (Testing)   ', leave=False):
+                # prepare data
+                feature_1, feature_2, y = map(lambda x: x.to(device), batch)
+
+                logits = self.model(feature_1, feature_2)
+                logits = self.classifier(logits[0])
+
+                if logits.shape[-1] == 1:
+                    pred = logits.sigmoid()
+
+                else:
+                    pred = logits
+
+                pred_list += pred.tolist()
+                real_list += y.tolist()
 
         return pred_list, real_list
 
