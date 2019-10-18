@@ -104,7 +104,7 @@ class ShuffleConvExpansion(nn.Module):
 
     def __init__(self, d_in, d_out):
         super().__init__()
-        self.n_channel = d_out // d_in
+        self.n_channel = int(d_out // d_in)
         self.index = feature_shuffle(d_in, depth=self.n_channel)
         self.index = torch.tensor(self.index)
         self.d_in = d_in
@@ -200,8 +200,9 @@ class ReactionAttentionLayerV1(nn.Module):
         self.n_head = n_head
         self.d_reactant = np.floor(d_reactant / n_head).astype(int)
         self.use_bottleneck = use_bottleneck
-        self.expansion = expansion_layer(d_f1, n_head * d_f1 * d_reactant)
-        self.expansion.initialize_param(nn.init.normal_, mean=0, std=np.sqrt(2.0 / (d_f1 + d_f1 * d_reactant)))
+        self.expansion = expansion_layer(d_f1, n_head * d_f1 * self.d_reactant)
+        self.expansion.initialize_param(nn.init.normal_)
+        # self.expansion.initialize_param(nn.init.normal_, mean=0, std=np.sqrt(2.0 / (d_f1 + d_f1 * d_reactant)))
 
 
         self.reactant = nn.Linear(d_f2, n_head * self.d_reactant)
