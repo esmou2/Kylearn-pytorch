@@ -7,7 +7,7 @@ class Model():
         self.save_path = save_path
         self.log_path = log_path
         self.model = None
-
+        self.train_logger = None
 
     def set_logger(self):
         self.train_logger = logger(self.log_path + 'train')
