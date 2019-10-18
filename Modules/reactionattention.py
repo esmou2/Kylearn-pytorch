@@ -8,10 +8,10 @@ class ReactionAttentionStack(nn.Module):
     ''' Reaction Attention Stack Module '''
 
     def __init__(
-            self, n_layers, n_head, d_f1, d_f2, d_reactant, d_hid=256, dropout=0.1):
+            self, expansion_layer, n_layers, n_head, d_f1, d_f2, d_reactant, d_hid=256, dropout=0.1):
         super().__init__()
         self.layer_stack = nn.ModuleList([
-            ReactionAttentionLayerV1(n_head, d_reactant, d_f1, d_f2, d_hid=d_hid, dropout=dropout)
+            ReactionAttentionLayerV1(expansion_layer, n_head, d_reactant, d_f1, d_f2, d_hid=d_hid, dropout=dropout)
             for _ in range(n_layers)])
 
     def forward(self, feature_1, feature_2, return_attns=False):
@@ -58,10 +58,11 @@ class AlternateStack(nn.Module):
     ''' Alternately stack the 2 attention blocks '''
 
     def __init__(
-            self, n_layers, n_head, d_f1, d_f2, d_reactant, d_hid=256, dropout=0.1):
+            self, expansion_layer, n_layers, n_head, d_f1, d_f2, d_reactant, d_hid=256, dropout=0.1):
         super().__init__()
         self.layer_stack = nn.ModuleList([
-            ReactionAttentionLayerV1(n_head, d_reactant, d_f1, d_f2, d_hid=d_hid, dropout=dropout) if i % 2 == 0
+            ReactionAttentionLayerV1(expansion_layer, n_head, d_reactant, d_f1, d_f2, d_hid=d_hid,
+                                     dropout=dropout) if i % 2 == 0
             else SelfAttentionLayer(n_head, d_reactant, d_f1, d_hid=d_hid, dropout=dropout)
             for i in range(n_layers)])
 
@@ -84,12 +85,13 @@ class ParallelStack(nn.Module):
     ''' Stack the 2 attention blocks in parallel '''
 
     def __init__(
-            self, n_layers, n_head, d_f1, d_f2, d_reactant, d_hid=256, dropout=0.1):
+            self, expansion_layer, n_layers, n_head, d_f1, d_f2, d_reactant, d_hid=256, dropout=0.1):
         super().__init__()
         self.n_layers = n_layers
 
         self.ra_stack = nn.ModuleList([
-            ReactionAttentionLayerV1(n_head, d_reactant, d_f1, d_f2, dropout=dropout, use_bottleneck=False)
+            ReactionAttentionLayerV1(expansion_layer, n_head, d_reactant, d_f1, d_f2, dropout=dropout,
+                                     use_bottleneck=False)
             for _ in range(n_layers)])
 
         self.sa_stack = nn.ModuleList([
