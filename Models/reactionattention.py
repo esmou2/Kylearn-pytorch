@@ -8,141 +8,83 @@ from framework.model import Model
 from tqdm import tqdm
 from utils.plot_curves import precision_recall as pr
 from utils.plot_curves import plot_pr_curve
-
-import pytorch_lightning as pl
-
-
-# class ReactionModelLightning(pl.LightningModule):
-#     def __init__(self, dataloader, stack, d_reactant, d_bottleneck, d_classifier, d_output, threshold=None,
-#                  n_layers=6, n_head=8, dropout=0.1):
-#         super().__init__()
-#
-#         self.dataloader = dataloader
-#         feature1_dim, feature2_dim = self.dataloader.get_feature_dim()
-#         self.model = stack(n_layers, n_head, feature1_dim, feature2_dim, d_reactant, d_bottleneck,
-#                            dropout)
-#         self.fc1 = nn.Linear(feature1_dim, d_classifier)
-#         self.fc2 = nn.Linear(d_classifier, d_output)
-#
-#         self.d_output = d_output
-#         self.threshold = threshold
-#
-#     def forward(self, feature_1, feature_2):
-#         output = self.model(feature_1, feature_2)
-#         output = self.fc1(output[0])
-#         output = nn.functional.relu(output)
-#         output = self.fc2(output)
-#         return output
-#
-#     def training_step(self, batch, batch_nb):
-#         feature_1, feature_2, y = batch
-#         logits = self.forward(feature_1, feature_2)
-#         pred = logits.sigmoid()
-#
-#         if y.shape[-1] == 1:
-#             loss = mse_loss(pred, y)
-#
-#         else:
-#             loss = cross_entropy_loss(pred, y, smoothing=True)
-#
-#         acc = accuracy(pred, y, threshold=self.threshold)
-#         _, _, precision_avg, recall_avg = precision_recall(pred, y, self.d_output, threshold=self.threshold)
-#         tensorboard_logs = {'train_loss': loss, 'train_acc': acc,
-#                             'train_precision': precision_avg,
-#                             'train_recall': recall_avg}
-#
-#         return {'loss': loss, 'acc': acc, 'precision': precision_avg, 'recall': recall_avg, 'log': tensorboard_logs}
-#
-#     def validation_step(self, batch, batch_nb):
-#         feature_1, feature_2, y = batch
-#         logits = self.forward(feature_1, feature_2)
-#         pred = logits.sigmoid()
-#
-#         if y.shape[-1] == 1:
-#             loss = mse_loss(pred, y)
-#
-#         else:
-#             loss = cross_entropy_loss(pred, y, smoothing=False)
-#
-#         acc = accuracy(pred, y, threshold=self.threshold)
-#         _, _, precision_avg, recall_avg = precision_recall(pred, y, self.d_output, threshold=self.threshold)
-#
-#         return {'val_loss': loss, 'val_acc': acc,
-#                 'val_precision': precision_avg,
-#                 'val_recall': recall_avg}
-#
-#     def validation_end(self, outputs):
-#         avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
-#         avg_acc = torch.stack([x['val_acc'] for x in outputs]).mean()
-#         avg_precision = torch.stack([x['val_precision'] for x in outputs]).mean()
-#         avg_recall = torch.stack([x['val_recall'] for x in outputs]).mean()
-#
-#         tensorboard_logs = {'val_loss': avg_loss, 'val_acc': avg_acc,
-#                             'val_precision': avg_precision,
-#                             'val_recall': avg_recall}
-#
-#         return {'loss': avg_loss, 'acc': avg_acc, 'precision': avg_precision, 'recall': avg_recall,
-#                 'log': tensorboard_logs}
-#
-#     def configure_optimizers(self):
-#         # return AdamOptimizer(self.parameters(), 1000, 0.01)
-#         return Adam(self.parameters(), lr=0.005, betas=(0.9, 0.999))
-#
-#     @pl.data_loader
-#     def train_dataloader(self):
-#         return self.dataloader.train_dataloader()
-#
-#     @pl.data_loader
-#     def val_dataloader(self):
-#         return self.dataloader.val_dataloader()
-#
-#     @pl.data_loader
-#     def test_dataloader(self):
-#         return self.dataloader.test_dataloader()
+from Modules.reactionattention import ReactionAttentionStack, SelfAttentionStack, AlternateStack, ParallelStack
+from Layers.reactionattention import LinearExpansion, ReduceParamLinearExpansion, ConvExpansion, LinearConvExpansion, \
+    ShuffleConvExpansion
 
 
 class ReactionModel_(Model):
-    def __init__(self, save_path, log_path, dataloader, optimizer, stack, d_reactant, d_bottleneck, d_classifier,
-                 d_output, threshold=None, n_layers=6, n_head=8, dropout=0.1, lr=0.001):
+    def __init__(
+            self, save_path, log_path, dataloader, d_reactant, d_bottleneck, d_classifier,
+            d_output, threshold=None, n_layers=6, n_head=8, dropout=0.1,
+            stack='ReactionAttention', expansion_layer='LinearExpansion', optimizer=None):
 
         super().__init__(save_path, log_path)
 
-        self.train_logger = None
-
-        device_ids = list(range(torch.cuda.device_count()))
-
+        # --------------------------- dataloader --------------------------- #
         self.dataloader = dataloader
         feature1_dim, feature2_dim = self.dataloader.get_feature_dim()
-        self.model = stack(n_layers, n_head, feature1_dim, feature2_dim, d_reactant, d_bottleneck,
-                           dropout)
+        # ^-------------------------- dataloader --------------------------^ #
 
+        # ----------------------------- model ------------------------------ #
+        stack_dict = {
+            'ReactionAttention': ReactionAttentionStack,
+            'SelfAttention': SelfAttentionStack,
+            'Alternate': AlternateStack,
+            'Parallel': ParallelStack,
+        }
+        expansion_dict = {
+            'LinearExpansion': LinearExpansion,
+            'ReduceParamLinearExpansion': ReduceParamLinearExpansion,
+            'ConvExpansion': ConvExpansion,
+            'LinearConvExpansion': LinearConvExpansion,
+            'ShuffleConvExpansion': ShuffleConvExpansion,
+
+        }
+        self.model = stack_dict[stack](expansion_dict[expansion_layer], n_layers, n_head, feature1_dim, feature2_dim,
+                                       d_reactant, d_bottleneck,
+                                       dropout)
+
+        # ^---------------------------- model -----------------------------^ #
+
+        # --------------------------- classifier --------------------------- #
         # self.classifier = LinearClassifier(feature1_dim, d_classifier, d_output)
         self.classifier = nn.Linear(feature1_dim, d_output, bias=False)
         nn.init.xavier_normal_(self.classifier.weight)
+        # ^-------------------------- classifier --------------------------^ #
 
+        # If GPU available, move the graph to GPU(s)
         if self.check_cuda():
-            # # DataParallel not working, don't know why
+            # device_ids = list(range(torch.cuda.device_count()))
             # self.model = nn.DataParallel(self.model, device_ids)
             # self.fc1 = nn.DataParallel(self.fc1, device_ids)
             # self.fc2 = nn.DataParallel(self.fc2, device_ids)
             self.model.cuda()
             self.classifier.cuda()
 
-
-
-
         self.parameters = list(self.model.parameters()) + list(self.classifier.parameters())
 
         self.d_output = d_output
         self.threshold = threshold
 
-        self.optimizer = optimizer(self.parameters, lr = lr, betas=(0.9, 0.999))
+        if optimizer == None:
+            self.optimizer = Adam(self.parameters, lr=0.001, betas=(0.9, 0.999))
 
+        # --------------------------- training control --------------------------- #
         self.controller = TrainingControl(max_step=100000, evaluate_every_nstep=100, print_every_nstep=10)
         self.early_stopping = EarlyStopping(patience=50)
+        # --------------------------- training control --------------------------- #
+
 
     def train_epoch(self, device, smothing):
         ''' Epoch operation in training phase'''
+
+        # check cuda:
+        if self.check_cuda():
+            pass
+        else:
+            print('CUDA not enabled, use CPU instead')
+            device = 'cpu'
 
         if self.train_logger == None:
             self.set_logger()
@@ -152,7 +94,6 @@ class ReactionModel_(Model):
 
         total_loss = 0
         batch_counter = 0
-
 
         for batch in tqdm(
                 self.dataloader.train_dataloader(), mininterval=1,
@@ -165,8 +106,6 @@ class ReactionModel_(Model):
             logits = self.model(feature_1, feature_2)
             logits = self.classifier(logits[0])
 
-
-
             if logits.shape[-1] == 1:
                 pred = logits.sigmoid()
                 loss = mse_loss(pred, y)
@@ -176,7 +115,8 @@ class ReactionModel_(Model):
                 loss = cross_entropy_loss(pred, y, smoothing=smothing)
 
             acc = accuracy(pred, y, threshold=self.threshold)
-            precision, recall, precision_avg, recall_avg = precision_recall(pred, y, self.d_output, threshold=self.threshold)
+            precision, recall, precision_avg, recall_avg = precision_recall(pred, y, self.d_output,
+                                                                            threshold=self.threshold)
 
             loss.backward()
 
@@ -212,7 +152,6 @@ class ReactionModel_(Model):
         self.model.eval()
         self.classifier.eval()
 
-
         total_loss = 0
         total_acc = 0
         total_pre = 0
@@ -230,7 +169,7 @@ class ReactionModel_(Model):
                 # prepare data
                 feature_1, feature_2, y = map(lambda x: x.to(device), batch)
 
-                logits= self.model(feature_1, feature_2)
+                logits = self.model(feature_1, feature_2)
                 logits = self.classifier(logits[0])
 
                 if logits.shape[-1] == 1:
@@ -253,12 +192,10 @@ class ReactionModel_(Model):
                 pred_list += pred.tolist()
                 real_list += y.tolist()
 
-
                 batch_counter += 1
 
             area, precisions, recalls, thresholds = pr(pred_list, real_list)
             plot_pr_curve(recalls, precisions, auc=area)
-
 
             loss_avg = total_loss / batch_counter
             acc_avg = total_acc / batch_counter
@@ -267,7 +204,7 @@ class ReactionModel_(Model):
 
             self.train_logger.info(
                 '[EVALUATION] - loss: { %3.4f },    acc: { %1.4f },    pre: { %1.4f },    rec: { %1.4f }' % (
-                        loss_avg, acc_avg, pre_avg, rec_avg))
+                    loss_avg, acc_avg, pre_avg, rec_avg))
 
             state_dict = self.early_stopping(loss_avg)
 
@@ -276,7 +213,7 @@ class ReactionModel_(Model):
                     'model_state_dict': self.model.state_dict(),
                     'optimizer_state_dict': self.optimizer.state_dict(),
                     'global_step': step}
-                self.save_model(checkpoint, self.save_path +'-loss-' + str(loss_avg))
+                self.save_model(checkpoint, self.save_path + '-loss-' + str(loss_avg))
 
             return state_dict['break']
 
@@ -292,9 +229,10 @@ class ReactionModel_(Model):
                 break
 
         print('[INFO]: Finish Training, ends with %d epoch(s) and %d batches, in total %d training steps.' % (
-        state_dict['epoch'] - 1, state_dict['batch'], state_dict['step']))
+            state_dict['epoch'] - 1, state_dict['batch'], state_dict['step']))
 
     def predict(self, data_loader, device):
+
         pred_list = []
         real_list = []
 
@@ -321,5 +259,3 @@ class ReactionModel_(Model):
                 real_list += y.tolist()
 
         return pred_list, real_list
-
-
