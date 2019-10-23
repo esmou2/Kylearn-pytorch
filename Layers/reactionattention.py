@@ -1,8 +1,7 @@
 import torch
 import torch.nn as nn
-
 import numpy as np
-from Layers.expansion import *
+from Layers.expansion import feature_shuffle
 
 
 class LinearBottleneckLayer(nn.Module):
@@ -283,7 +282,7 @@ class ShuffleSelfAttention(nn.Module):
         query = query.permute(2, 0, 1, 3)  # [n_head, batch, n_depth, (n_channel / n_head) * d_features]
         query = query.contiguous().view(n_head * batch_size, dim_2nd,
                                         -1)  # [n_head * batch, n_depth, (n_channel / n_head) * d_features] or [n_head * batch, d_features, (n_channel / n_head) * n_depth]
-        key = key.premute(2, 0, 1, 3).contiguous().view(n_head * batch_size, dim_2nd, -1)
+        key = key.permute(2, 0, 1, 3).contiguous().view(n_head * batch_size, dim_2nd, -1)
         value = value.permute(2, 0, 1, 3).contiguous().view(n_head * batch_size, dim_2nd, -1)
 
         output, attn = self.attention(query, key,
@@ -325,7 +324,7 @@ class ShuffleBottleneckLayer(nn.Module):
         nn.init.xavier_normal_(self.bottle_neck_2.weight)
         self.layer_norm = nn.LayerNorm([d_features])
 
-        self.activation = nn.functional.relu()
+        self.activation = nn.functional.relu
 
         self.dropout = nn.Dropout(dropout)
 
@@ -362,7 +361,7 @@ class ShuffleBottleneckLayer(nn.Module):
 
 
 class ShuffleSelfAttentionLayer(nn.Module):
-    def __init__(self, expansion_layer, n_head, n_channel, n_vchannel, n_depth, d_features, dropout=0.1, mode='1d',
+    def __init__(self, expansion_layer, n_head, n_channel, n_vchannel, n_depth, d_features, d_hid, dropout=0.1, mode='1d',
                  use_bottleneck=True):
         super().__init__()
         self.d_features = d_features
@@ -390,7 +389,7 @@ class ShuffleSelfAttentionLayer(nn.Module):
             pass
 
         if use_bottleneck:
-            self.bottleneck = ShuffleBottleneckLayer(n_depth, d_features, mode, d_hid=2 * d_features)
+            self.bottleneck = ShuffleBottleneckLayer(n_depth, d_features, mode, d_hid)
 
     def forward(self, features):
         if features.dim() == 2:
@@ -420,4 +419,4 @@ class ShuffleSelfAttentionLayer(nn.Module):
         if self.use_bottleneck:
             output = self.bottleneck(output)
 
-        return output
+        return output, attn
