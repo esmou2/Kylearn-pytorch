@@ -1,17 +1,17 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from Layers.reactionattention import ReactionAttentionLayerV1, SelfAttentionLayer, BottleneckLayer
+from Layers.reactionattention import ReactionAttentionLayerV1, SelfAttentionLayer, LinearBottleneckLayer
 
 
 class ReactionAttentionStack(nn.Module):
     ''' Reaction Attention Stack Module '''
 
     def __init__(
-            self, expansion_layer, n_layers, n_head, d_f1, d_f2, d_reactant, d_hid=256, dropout=0.1):
+            self, expansion_layer, n_layers, n_head, d_f1, d_f2, n_depth, d_hid=256, dropout=0.1):
         super().__init__()
         self.layer_stack = nn.ModuleList([
-            ReactionAttentionLayerV1(expansion_layer, n_head, d_reactant, d_f1, d_f2, d_hid=d_hid, dropout=dropout)
+            ReactionAttentionLayerV1(expansion_layer, n_head, n_depth, d_f1, d_f2, d_hid=d_hid, dropout=dropout)
             for _ in range(n_layers)])
 
     def forward(self, feature_1, feature_2, return_attns=False):
@@ -33,10 +33,10 @@ class SelfAttentionStack(nn.Module):
     ''' Self Attention Stack Module '''
 
     def __init__(
-            self, n_layers, n_head, d_f1, d_reactant, d_hid=256, dropout=0.1):
+            self, n_layers, n_head, d_f1, n_depth, d_hid=256, dropout=0.1):
         super().__init__()
         self.layer_stack = nn.ModuleList([
-            SelfAttentionLayer(n_head, d_reactant, d_f1, d_hid=d_hid, dropout=dropout)
+            SelfAttentionLayer(n_head, n_depth, d_f1, d_hid=d_hid, dropout=dropout)
             for _ in range(n_layers)])
 
     def forward(self, feature_1, feature_2=None, return_attns=False):
@@ -58,12 +58,12 @@ class AlternateStack(nn.Module):
     ''' Alternately stack the 2 attention blocks '''
 
     def __init__(
-            self, expansion_layer, n_layers, n_head, d_f1, d_f2, d_reactant, d_hid=256, dropout=0.1):
+            self, expansion_layer, n_layers, n_head, d_f1, d_f2, n_depth, d_hid=256, dropout=0.1):
         super().__init__()
         self.layer_stack = nn.ModuleList([
-            ReactionAttentionLayerV1(expansion_layer, n_head, d_reactant, d_f1, d_f2, d_hid=d_hid,
+            ReactionAttentionLayerV1(expansion_layer, n_head, n_depth, d_f1, d_f2, d_hid=d_hid,
                                      dropout=dropout) if i % 2 == 0
-            else SelfAttentionLayer(n_head, d_reactant, d_f1, d_hid=d_hid, dropout=dropout)
+            else SelfAttentionLayer(n_head, n_depth, d_f1, d_hid=d_hid, dropout=dropout)
             for i in range(n_layers)])
 
     def forward(self, feature_1, feature_2, return_attns=False):
@@ -85,21 +85,21 @@ class ParallelStack(nn.Module):
     ''' Stack the 2 attention blocks in parallel '''
 
     def __init__(
-            self, expansion_layer, n_layers, n_head, d_f1, d_f2, d_reactant, d_hid=256, dropout=0.1):
+            self, expansion_layer, n_layers, n_head, d_f1, d_f2, n_depth, d_hid=256, dropout=0.1):
         super().__init__()
         self.n_layers = n_layers
 
         self.ra_stack = nn.ModuleList([
-            ReactionAttentionLayerV1(expansion_layer, n_head, d_reactant, d_f1, d_f2, dropout=dropout,
+            ReactionAttentionLayerV1(expansion_layer, n_head, n_depth, d_f1, d_f2, dropout=dropout,
                                      use_bottleneck=False)
             for _ in range(n_layers)])
 
         self.sa_stack = nn.ModuleList([
-            SelfAttentionLayer(n_head, d_reactant, d_f1, dropout=dropout, use_bottleneck=False)
+            SelfAttentionLayer(n_head, n_depth, d_f1, dropout=dropout, use_bottleneck=False)
             for _ in range(n_layers)])
 
         self.bottleneck_stack = nn.ModuleList([
-            BottleneckLayer(2 * d_f1, d_hid, d_out=d_f1)
+            LinearBottleneckLayer(2 * d_f1, d_hid, d_out=d_f1)
             for _ in range(n_layers)])
 
     def forward(self, feature_1, feature_2, return_attns=False):
