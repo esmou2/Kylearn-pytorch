@@ -194,8 +194,8 @@ class ReactionModel_(Model):
 
                 batch_counter += 1
 
-            area, precisions, recalls, thresholds = pr(pred_list, real_list)
-            plot_pr_curve(recalls, precisions, auc=area)
+            # area, precisions, recalls, thresholds = pr(pred_list, real_list)
+            # plot_pr_curve(recalls, precisions, auc=area)
 
             loss_avg = total_loss / batch_counter
             acc_avg = total_acc / batch_counter
@@ -253,7 +253,7 @@ class ReactionModel_(Model):
                     pred = logits.sigmoid()
 
                 else:
-                    pred = logits
+                    pred = logits.softmax(-1)
 
                 pred_list += pred.tolist()
                 real_list += y.tolist()
