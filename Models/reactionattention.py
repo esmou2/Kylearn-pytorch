@@ -8,9 +8,8 @@ from framework.model import Model
 from tqdm import tqdm
 from utils.plot_curves import precision_recall as pr
 from utils.plot_curves import plot_pr_curve
-from Modules.reactionattention import ReactionAttentionStack, SelfAttentionStack, AlternateStack, ParallelStack
-from Layers.reactionattention import LinearExpansion, ReduceParamLinearExpansion, ConvExpansion, LinearConvExpansion, \
-    ShuffleConvExpansion
+from Modules.reactionattention import *
+from Layers.expansion import *
 
 
 class ReactionModel_(Model):
@@ -32,6 +31,7 @@ class ReactionModel_(Model):
             'SelfAttention': SelfAttentionStack,
             'Alternate': AlternateStack,
             'Parallel': ParallelStack,
+            'ShuffleSelfAttention': ShuffleSelfAttentionStack
         }
         expansion_dict = {
             'LinearExpansion': LinearExpansion,
@@ -39,11 +39,14 @@ class ReactionModel_(Model):
             'ConvExpansion': ConvExpansion,
             'LinearConvExpansion': LinearConvExpansion,
             'ShuffleConvExpansion': ShuffleConvExpansion,
+            'ChannelWiseConvExpansion': ChannelWiseConvExpansion,
 
         }
-        self.model = stack_dict[stack](expansion_dict[expansion_layer], n_layers, n_head, feature1_dim, feature2_dim,
-                                       d_reactant, d_bottleneck,
-                                       dropout)
+        # self.model = stack_dict[stack](expansion_dict[expansion_layer], n_layers, n_head, feature1_dim, feature2_dim,
+        #                                d_reactant, d_bottleneck,
+        #                                dropout)
+
+        self.model = stack_dict[stack](expansion_dict[expansion_layer], n_layers, n_head, 8, d_reactant, feature1_dim, d_hid=256, dropout=0.1)
 
         # ^---------------------------- model -----------------------------^ #
 
