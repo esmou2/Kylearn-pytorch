@@ -9,8 +9,8 @@ dataloader = ReactionDataloader('/Users/sunjincheng/Desktop/Hackathon/data/allpm
 
 
 model = ReactionModel_('models/ckpt', 'logs', dataloader, d_reactant=64, d_bottleneck=128, d_classifier=512, n_layers=6,
-                       n_head=8, dropout=0.1, d_output=2, stack='ReactionAttention',
-                       expansion_layer='ShuffleConvExpansion'
+                       n_head=8, dropout=0.1, d_output=2, stack='ShuffleSelfAttention',
+                       expansion_layer='ChannelWiseConvExpansion'
                        )
 
 model.train(epoch=20, device='cuda', smoothing=False, save_mode='best')
