@@ -7,7 +7,9 @@ class Model():
         self.save_path = save_path
         self.log_path = log_path
         self.model = None
+        self.classifier = None
         self.train_logger = None
+
 
     def set_logger(self):
         self.train_logger = logger(self.log_path + 'train')
@@ -32,15 +34,27 @@ class Model():
 
     def resume_checkpoint(self, checkpoint_path):
         checkpoint = torch.load(checkpoint_path)
-        state_dict = checkpoint['model_state_dict']
-        self.model.load_state_dict(state_dict)
-        self.model.train()
+
+        if self.model != None:
+            model_state_dict = checkpoint['model_state_dict']
+            self.model.load_state_dict(model_state_dict)
+            self.model.train()
+
+        classifier_state_dict = checkpoint['classifier_state_dict']
+        self.classifier.load_state_dict(classifier_state_dict)
+        self.classifier.train()
 
     def save_model(self, checkpoint, save_path):
         torch.save(checkpoint, save_path)
 
     def load_model(self, checkpoint_path):
         checkpoint = torch.load(checkpoint_path)
-        state_dict = checkpoint['model_state_dict']
-        self.model.load_state_dict(state_dict)
-        self.model.eval()
+
+        if self.model != None:
+            model_state_dict = checkpoint['model_state_dict']
+            self.model.load_state_dict(model_state_dict)
+            self.model.eval()
+
+        classifier_state_dict = checkpoint['classifier_state_dict']
+        self.classifier.load_state_dict(classifier_state_dict)
+        self.classifier.eval()
