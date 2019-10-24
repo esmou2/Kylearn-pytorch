@@ -6,7 +6,7 @@ class LinearClassifier(nn.Module):
         super(LinearClassifier, self).__init__()
 
         self.fc1 = nn.Linear(d_in, d_hid)
-        self.activation = nn.LeakyReLU()
+        self.activation = nn.functional.leaky_relu
         self.fc2 = nn.Linear(d_hid, d_out)
 
         nn.init.xavier_normal_(self.fc1.weight)
