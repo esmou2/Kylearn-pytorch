@@ -25,8 +25,7 @@ def cross_entropy_loss(logits, real, smoothing=False):
     return loss
 
 
-def mse_loss(logits, real):
-    z = F.sigmoid(logits)
-    loss = F.mse_loss(z, real)
+def mse_loss(pred, real):
+    loss = F.mse_loss(pred, real)
 
     return loss
