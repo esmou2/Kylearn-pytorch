@@ -49,8 +49,11 @@ class ReactionDataloader():
         train_indices, val_indices = indices[split:], indices[:split]
 
         # train_sampler = SubsetRandomSampler(train_indices)
-        train_sampler = BalanceSampler(train_set.y, train_indices)
         valid_sampler = SubsetRandomSampler(val_indices)
+
+        train_sampler = BalanceSampler(train_set.y, train_indices)
+        # valid_sampler = BalanceSampler(train_set.y, val_indices)
+
 
         self.train_loader = DataLoader(train_set, batch_size, sampler=train_sampler, num_workers=4)
         self.val_loader = DataLoader(train_set, batch_size, sampler=valid_sampler, num_workers=4)
@@ -58,7 +61,7 @@ class ReactionDataloader():
         # Load test data
         test_set = ReactionDataset(file_dir + 'X_test.npy', file_dir + 'dev_test.npy', file_dir + 'y_test.npy')
 
-        self.test_loader = DataLoader(test_set, batch_size, shuffle, num_workers=4)
+        self.test_loader = DataLoader(test_set, batch_size, num_workers=4)
 
     def train_dataloader(self):
         return self.train_loader

@@ -8,25 +8,25 @@ class ReactionAttentionStack(nn.Module):
     ''' Reaction Attention Stack Module '''
 
     def __init__(
-            self, expansion_layer, n_layers, n_head, d_f1, d_f2, n_depth, d_hid=256, dropout=0.1):
+            self, expansion_layer, n_layers, n_head, d_features, d_meta, n_depth, d_hid=256, dropout=0.1):
         super().__init__()
         self.layer_stack = nn.ModuleList([
-            ReactionAttentionLayerV1(expansion_layer, n_head, n_depth, d_f1, d_f2, d_hid=d_hid, dropout=dropout)
+            ReactionAttentionLayerV1(expansion_layer, n_head, n_depth, d_features, d_meta, d_bottleneck=d_hid, dropout=dropout)
             for _ in range(n_layers)])
 
-    def forward(self, feature_1, feature_2, return_attns=False):
+    def forward(self, features, meta_features, return_attns=False):
 
         reaction_attn_list = []
 
         for ra_layer in self.layer_stack:
-            feature_1, reaction_attn = ra_layer(
-                feature_1, feature_2)
+            features, reaction_attn = ra_layer(
+                features, meta_features)
             if return_attns:
                 reaction_attn_list += [reaction_attn]
 
         if return_attns:
-            return feature_1, reaction_attn_list
-        return feature_1,
+            return features, reaction_attn_list
+        return features,
 
 
 class SelfAttentionStack(nn.Module):
@@ -61,7 +61,7 @@ class AlternateStack(nn.Module):
             self, expansion_layer, n_layers, n_head, d_f1, d_f2, n_depth, d_hid=256, dropout=0.1):
         super().__init__()
         self.layer_stack = nn.ModuleList([
-            ReactionAttentionLayerV1(expansion_layer, n_head, n_depth, d_f1, d_f2, d_hid=d_hid,
+            ReactionAttentionLayerV1(expansion_layer, n_head, n_depth, d_f1, d_f2, d_bottleneck=d_hid,
                                      dropout=dropout) if i % 2 == 0
             else SelfAttentionLayer(expansion_layer, n_head, n_depth, d_f1, d_hid=d_hid, dropout=dropout)
             for i in range(n_layers)])
@@ -124,24 +124,20 @@ class ShuffleSelfAttentionStack(nn.Module):
     ''' Self Attention Stack Module '''
 
     def __init__(
-            self,expansion_layer, n_layers, n_head, n_channel, n_depth, d_features, d_hid=256, dropout=0.1):
+            self,expansion_layer, n_depth, d_features, n_layers, n_head, n_channel, n_vchannel, d_bottleneck=256, dropout=0.1, mode='1d', use_bottleneck=True):
         super().__init__()
         self.layer_stack = nn.ModuleList([
-            ShuffleSelfAttentionLayer(expansion_layer, n_head, n_channel, n_channel, n_depth, d_features, d_hid, dropout=dropout,
-                                      mode='1d',
-                                      use_bottleneck=True)
+            ShuffleSelfAttentionLayer(expansion_layer, n_depth, d_features, n_head, n_channel, n_vchannel, dropout=dropout,
+                                      mode=mode, use_bottleneck=use_bottleneck, d_bottleneck=d_bottleneck)
             for _ in range(n_layers)])
 
-    def forward(self, feature_1, feature_2=None, return_attns=False):
+    def forward(self, feature_1, feature_2=None):
 
         self_attn_list = []
 
         for sa_layer in self.layer_stack:
             feature_1, self_attn = sa_layer(
                 feature_1)
-            if return_attns:
-                self_attn_list += [self_attn]
+            self_attn_list += [self_attn]
 
-        if return_attns:
-            return feature_1, self_attn_list
-        return feature_1,
+        return feature_1, self_attn_list
