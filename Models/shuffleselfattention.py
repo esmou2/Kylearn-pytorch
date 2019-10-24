@@ -73,12 +73,12 @@ class ShuffleSelfAttentionModel(Model):
         self.early_stopping = EarlyStopping(patience=50)
 
         # --------------------- logging and tensorboard -------------------- #
-        self.set_logger()
 
         # ---------------------------- END INIT ---------------------------- #
 
     def train_epoch(self, train_dataloader, eval_dataloader, device, smothing):
         ''' Epoch operation in training phase'''
+
         if device == 'cuda':
             assert self.CUDA_AVAILABLE
         # Set model and classifier training mode
@@ -149,7 +149,7 @@ class ShuffleSelfAttentionModel(Model):
 
         return state_dict
 
-    def val_epoch(self, dataloader, device, step):
+    def val_epoch(self, dataloader, device, step=0, plot=False):
         ''' Epoch operation in evaluation phase '''
         if device == 'cuda':
             assert self.CUDA_AVAILABLE
@@ -195,11 +195,13 @@ class ShuffleSelfAttentionModel(Model):
                 evaluator(loss.item(), acc.item(), precision[1].item(), recall[1].item())
 
                 '''append the results to the predict / real list for drawing ROC or PR curve.'''
-            #     pred_list += pred.tolist()
-            #     real_list += y.tolist()
-            #
-            # area, precisions, recalls, thresholds = pr(pred_list, real_list)
-            # plot_pr_curve(recalls, precisions, auc=area)
+                if plot:
+                    pred_list += pred.tolist()
+                    real_list += y.tolist()
+
+            if plot:
+                area, precisions, recalls, thresholds = pr(pred_list, real_list)
+                plot_pr_curve(recalls, precisions, auc=area)
 
             # get evaluation results from the evaluator
             loss_avg, acc_avg, pre_avg, rec_avg = evaluator.avg_results()
@@ -213,21 +215,27 @@ class ShuffleSelfAttentionModel(Model):
             if state_dict['save']:
                 checkpoint = {
                     'model_state_dict': self.model.state_dict(),
+                    'classifier_state_dict': self.classifier.state_dict(),
                     'optimizer_state_dict': self.optimizer.state_dict(),
                     'global_step': step}
-                self.save_model(checkpoint, self.save_path + '-loss-' + str(loss_avg))
+                self.save_model(checkpoint, self.save_path + '-loss-%.5f'%loss_avg)
 
             return state_dict['break']
 
     def train(self, epoch, train_dataloader, eval_dataloader, device, smoothing, save_mode):
+        # set logger
+        self.set_logger()
+
         assert save_mode in ['all', 'best']
         # train for n epoch
         for epoch_i in range(epoch):
             print('[ Epoch', epoch_i, ']')
             # set current epoch
-            self.controller.set_epoch(epoch_i)
+            self.controller.set_epoch(epoch_i + 1)
             # train for on epoch
             state_dict = self.train_epoch(train_dataloader, eval_dataloader, device, smoothing)
+
+            self.val_epoch(eval_dataloader, device, plot=True)
 
             if state_dict['step_to_stop']:
                 break
