@@ -223,7 +223,7 @@ class ReactionModel(Model):
         for epoch_i in range(epoch):
             print('[ Epoch', epoch_i, ']')
             # set current epoch
-            self.controller.set_epoch(epoch_i)
+            self.controller.set_epoch(epoch_i + 1)
             # train for on epoch
             state_dict = self.train_epoch(train_dataloader,eval_dataloader, device, smoothing)
 
