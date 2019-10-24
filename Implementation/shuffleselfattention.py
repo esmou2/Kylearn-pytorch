@@ -4,11 +4,11 @@ from pytorch_lightning import Trainer
 import torch.nn as nn
 from torch.optim import Adam
 
-# dataloader = ReactionDataloader('/home/oem/Projects/ciena_hackathon/data/', batch_size=1000, val_size=0.01)
-dataloader = ReactionDataloader('/Users/sunjincheng/Desktop/Hackathon/data/allpm_anomaly/', batch_size=1000, val_size=0.01)
+dataloader = ReactionDataloader('/home/oem/Projects/ciena_hackathon/data/', batch_size=500, val_size=0.01)
+# dataloader = ReactionDataloader('/Users/sunjincheng/Desktop/Hackathon/data/allpm_anomaly/', batch_size=1000, val_size=0.01)
 
 
-model = ReactionModel_('models/ckpt', 'logs', dataloader, d_reactant=64, d_bottleneck=128, d_classifier=512, n_layers=6,
+model = ReactionModel_('models/ckpt', 'logs', dataloader, n_depth=64, d_bottleneck=128, d_classifier=512, n_layers=3,
                        n_head=8, dropout=0.1, d_output=2, stack='ShuffleSelfAttention',
                        expansion_layer='ChannelWiseConvExpansion'
                        )
