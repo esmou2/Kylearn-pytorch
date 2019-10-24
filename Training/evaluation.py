@@ -91,3 +91,25 @@ def precision_recall(pred, real, d_output, threshold=None, average='macro', eps 
 
     return precision, recall, precision_avg, recall_avg
 
+class Evaluator():
+    def __init__(self):
+        self.total_loss = 0
+        self.total_acc = 0
+        self.total_pre = 0
+        self.total_rec = 0
+        self.batch_counter = 0
+
+
+    def __call__(self, loss, acc, precision, recall):
+        self.total_loss += loss
+        self.total_acc += acc
+        self.total_pre += precision
+        self.total_rec += recall
+        self.batch_counter += 1
+
+    def avg_results(self):
+        loss_avg = self.total_loss / self.batch_counter
+        acc_avg = self.total_acc / self.batch_counter
+        pre_avg = self.total_pre / self.batch_counter
+        rec_avg = self.total_rec / self.batch_counter
+        return loss_avg, acc_avg, pre_avg, rec_avg
