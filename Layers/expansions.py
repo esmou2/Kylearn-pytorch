@@ -21,10 +21,10 @@ class LinearExpansion(nn.Module):
                 x {Tensor, shape [batch, d_features]} -- input
 
             Returns:
-                x {Tensor, shape [batch, d_out]} -- output
+                x {Tensor, shape [batch, n_channel * n_depth, d_features]} -- output
         '''
         x = self.expansion(x)
-        x = x.view([-1, self.d_features, self.n_channel * self.n_depth])
+        x = x.view([-1, self.n_channel * self.n_depth, self.d_features])
         return x
 
     def initialize_param(self, init, *args):
@@ -49,10 +49,10 @@ class ReduceParamLinearExpansion(nn.Module):
                 x {Tensor, shape [batch, d_features]} -- input
 
             Returns:
-                x {Tensor, shape [batch, d_out]} -- output
+                x {Tensor, shape [batch, n_channel * n_depth, d_features]} -- output
         '''
         x = self.layer1(x)
-        x = self.layer2(x)
+        x = self.layer2(x).view([-1, self.n_channel * self.n_depth, self.d_features])
         return x
 
     def initialize_param(self, init, *args):
@@ -76,13 +76,12 @@ class ConvExpansion(nn.Module):
                 x {Tensor, shape [batch, d_features]} -- input
 
             Returns:
-                x {Tensor, shape [batch, d_features, n_channel * n_depth]} -- output
+                x {Tensor, shape [batch, n_channel * n_depth, d_features]} -- output
         '''
         assert x.dim() <= 3
         if x.dim() == 2:
             x = x.view(-1, 1, self.d_features)
         x = self.conv(x)
-        x = x.transpose(2, 1)
         return x
 
     def initialize_param(self, init, *args):
@@ -107,11 +106,10 @@ class LinearConvExpansion(nn.Module):
                 x {Tensor, shape [batch, d_features]} -- input
 
             Returns:
-                x {Tensor, shape [batch, d_features, n_channel * n_depth]} -- output
+                x {Tensor, shape [batch, n_channel * n_depth, d_features]} -- output
         '''
         x = self.linear(x).view(-1, self.d_hid, self.d_features)
         x = self.conv(x)
-        x = x.transpose(2, 1)
         return x
 
     def initialize_param(self, init, *args):
@@ -139,12 +137,11 @@ class ShuffleConvExpansion(nn.Module):
                 x {Tensor, shape [batch, d_features]} -- input
 
             Returns:
-                x {Tensor, shape [batch, d_features, n_channel * n_depth]} -- output
+                x {Tensor, shape [batch, n_channel * n_depth, d_features]} -- output
         '''
         x = x[:, self.index]  # [batch, d_out]
-        x = x.view(-1, self.n_channel * self.n_depth, self.d_features)  # [batch, n_channel, d_features]
-        x = self.conv(x)  # [batch, n_channel, d_features]
-        x = x.transpose(2, 1)
+        x = x.view(-1, self.n_channel * self.n_depth, self.d_features)  # [batch, n_channel * n_depth, d_features]
+        x = self.conv(x)
         return x
 
     def initialize_param(self, init, *args):
@@ -177,7 +174,7 @@ class ChannelWiseConv(nn.Module):
 
 
 class ChannelWiseConvExpansion(nn.Module):
-    '''expansion 1D -> 3D'''
+    '''expansion 1D -> 3D -> flatten'''
 
     def __init__(self, d_features, n_channel, n_depth):
         super().__init__()
@@ -191,7 +188,7 @@ class ChannelWiseConvExpansion(nn.Module):
     def forward(self, x):
         '''
             Arguments:
-                x {Tensor, shape [batch, d_features]} -- input
+                x {Tensor, shape [batch, n_depth, d_features]} -- input
 
             Returns:
                 x {Tensor, shape [batch, n_depth, n_channel * d_features]} -- output
