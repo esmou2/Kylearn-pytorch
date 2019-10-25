@@ -7,14 +7,15 @@ from framework.model import Model
 from tqdm import tqdm
 from utils.plot_curves import precision_recall as pr
 from utils.plot_curves import plot_pr_curve
-from Modules.reactionattention import *
-from Layers.expansion import *
+from Modules.attention import *
+from Layers.expansions import *
 
 
 class ReactionModel(Model):
     def __init__(
-            self, save_path, log_path, d_f1, d_f2, n_depth, d_classifier, d_output, threshold,
-            stack='ReactionAttention', expansion_layer='LinearExpansion', mode='1d',optimizer=None, *args):
+            self, save_path, log_path, n_depth, d_features, d_meta, d_classifier, d_output, threshold,
+            stack='ReactionAttention', expansion_layer='LinearExpansion', mode='1d',optimizer=None, **kwargs):
+        '''*args: n_layers, n_head, dropout, use_bottleneck, d_bottleneck'''
 
         super().__init__(save_path, log_path)
         self.d_output = d_output
@@ -36,24 +37,18 @@ class ReactionModel(Model):
             'ShuffleConvExpansion': ShuffleConvExpansion,
             'ChannelWiseConvExpansion': ChannelWiseConvExpansion,
         }
-        # *args: n_layers, n_head, n_channel, n_vchannel, dropout, use_bottleneck, d_bottleneck
-        self.model = stack_dict[stack](expansion_dict[expansion_layer], n_depth=n_depth, d_features=d_f1, d_meta=d_f1, mode=mode, *args)
+        # *args:  n_head, n_depth,d_bottleneck=256, dropout=0.1, use_bottleneck=True
+        self.model = stack_dict[stack](expansion_dict[expansion_layer],n_depth=n_depth, d_features=d_features, d_meta=d_meta, **kwargs)
 
         # --------------------------- Classifier --------------------------- #
         if mode == '1d':
-            self.classifier = LinearClassifier(d_f1, d_classifier, d_output)
+            self.classifier = LinearClassifier(d_features, d_classifier, d_output)
         elif mode =='2d':
-            self.classifier = LinearClassifier(n_depth * d_f1, d_classifier, d_output)
+            self.classifier = LinearClassifier(n_depth * d_features, d_classifier, d_output)
         else:
             self.classifier = None
 
-        # ------------------------------ CUDA ------------------------------ #
-        # If GPU available, move the graph to GPU(s)
 
-        # device_ids = list(range(torch.cuda.device_count()))
-        # self.model = nn.DataParallel(self.model, device_ids)
-        # self.fc1 = nn.DataParallel(self.fc1, device_ids)
-        # self.fc2 = nn.DataParallel(self.fc2, device_ids)]
         self.CUDA_AVAILABLE = self.check_cuda()
         if self.CUDA_AVAILABLE:
             self.model.cuda()
@@ -70,8 +65,6 @@ class ReactionModel(Model):
         self.controller = TrainingControl(max_step=100000, evaluate_every_nstep=100, print_every_nstep=10)
         self.early_stopping = EarlyStopping(patience=50)
 
-        # --------------------- logging and tensorboard -------------------- #
-        self.set_logger()
 
         # ---------------------------- END INIT ---------------------------- #
 
@@ -147,7 +140,7 @@ class ReactionModel(Model):
 
         return state_dict
 
-    def val_epoch(self,dataloader, device, step):
+    def val_epoch(self,dataloader, device, step=0, plot=False):
         ''' Epoch operation in evaluation phase '''
         if device == 'cuda':
             assert self.CUDA_AVAILABLE
@@ -193,11 +186,13 @@ class ReactionModel(Model):
                 evaluator(loss.item(), acc.item(), precision[1].item(), recall[1].item())
 
                 '''append the results to the predict / real list for drawing ROC or PR curve.'''
-            #     pred_list += pred.tolist()
-            #     real_list += y.tolist()
-            #
-            # area, precisions, recalls, thresholds = pr(pred_list, real_list)
-            # plot_pr_curve(recalls, precisions, auc=area)
+                if plot:
+                    pred_list += pred.tolist()
+                    real_list += y.tolist()
+
+            if plot:
+                area, precisions, recalls, thresholds = pr(pred_list, real_list)
+                plot_pr_curve(recalls, precisions, auc=area)
 
             # get evaluation results from the evaluator
             loss_avg, acc_avg, pre_avg, rec_avg = evaluator.avg_results()
@@ -211,13 +206,17 @@ class ReactionModel(Model):
             if state_dict['save']:
                 checkpoint = {
                     'model_state_dict': self.model.state_dict(),
+                    'classifier_state_dict': self.classifier.state_dict(),
                     'optimizer_state_dict': self.optimizer.state_dict(),
                     'global_step': step}
-                self.save_model(checkpoint, self.save_path + '-loss-' + str(loss_avg))
+                self.save_model(checkpoint, self.save_path + '-loss-%.5f'%loss_avg)
 
             return state_dict['break']
 
     def train(self, epoch, train_dataloader, eval_dataloader, device, smoothing, save_mode):
+        # set logger
+        self.set_logger()
+
         assert save_mode in ['all', 'best']
         # train for n epoch
         for epoch_i in range(epoch):
@@ -225,7 +224,9 @@ class ReactionModel(Model):
             # set current epoch
             self.controller.set_epoch(epoch_i + 1)
             # train for on epoch
-            state_dict = self.train_epoch(train_dataloader,eval_dataloader, device, smoothing)
+            state_dict = self.train_epoch(train_dataloader, eval_dataloader, device, smoothing)
+
+            self.val_epoch(eval_dataloader, device, plot=True)
 
             if state_dict['step_to_stop']:
                 break

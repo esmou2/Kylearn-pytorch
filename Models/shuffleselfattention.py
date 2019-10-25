@@ -7,8 +7,8 @@ from framework.model import Model
 from tqdm import tqdm
 from utils.plot_curves import precision_recall as pr
 from utils.plot_curves import plot_pr_curve
-from Modules.reactionattention import *
-from Layers.expansion import *
+from Modules.attention import *
+from Layers.expansions import *
 
 
 class ShuffleSelfAttentionModel(Model):
