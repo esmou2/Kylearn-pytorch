@@ -218,7 +218,7 @@ class ShuffleSelfAttentionModel(Model):
                     'classifier_state_dict': self.classifier.state_dict(),
                     'optimizer_state_dict': self.optimizer.state_dict(),
                     'global_step': step}
-                self.save_model(checkpoint, self.save_path + '-loss-%.5f'%loss_avg)
+                self.save_model(checkpoint, self.save_path + '-step-%d_loss-%.5f'%(step,loss_avg))
 
             return state_dict['break']
 
@@ -240,7 +240,7 @@ class ShuffleSelfAttentionModel(Model):
             if state_dict['step_to_stop']:
                 break
 
-        print('[INFO]: Finish Training, ends with %d epoch(s) and %d batches, in total %d training steps.' % (
+        self.train_logger.info('[INFO]: Finish Training, ends with %d epoch(s) and %d batches, in total %d training steps.' % (
             state_dict['epoch'] - 1, state_dict['batch'], state_dict['step']))
 
     def get_predictions(self, data_loader, device, max_batches=None, activation=None):
