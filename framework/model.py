@@ -1,7 +1,8 @@
 from abc import abstractmethod
 from utils.loggings import logger
 import torch
-from collections import OrderedDict
+from torch.utils.tensorboard import SummaryWriter
+
 class Model():
     def __init__(self, save_path, log_path):
         self.save_path = save_path
@@ -9,15 +10,9 @@ class Model():
         self.model = None
         self.classifier = None
         self.train_logger = None
+        self.eval_logger = None
+        self.summary_writer = None
 
-
-    def set_logger(self):
-        self.train_logger = logger(self.log_path + 'train')
-
-    def check_cuda(self):
-        if torch.cuda.is_available():
-            print("INFO: CUDA device exists")
-            return torch.cuda.is_available()
 
     @abstractmethod
     def loss(self, **kwargs):
@@ -30,6 +25,23 @@ class Model():
     @abstractmethod
     def evaluate(self, **kwargs):
         pass
+
+    @abstractmethod
+    def checkpoint(self, **kwargs):
+        pass
+
+
+    def set_logger(self, mode='a'):
+        self.train_logger = logger('train',self.log_path + '-train', mode=mode)
+        self.eval_logger = logger('eval', self.log_path + '-eval', mode=mode)
+
+    def set_summary_writer(self):
+        self.summary_writer = SummaryWriter(self.log_path + 'tensorboard')
+
+    def check_cuda(self):
+        if torch.cuda.is_available():
+            print("INFO: CUDA device exists")
+            return torch.cuda.is_available()
 
 
     def resume_checkpoint(self, checkpoint_path):
