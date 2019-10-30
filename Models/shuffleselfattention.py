@@ -10,10 +10,20 @@ from utils.plot_curves import plot_pr_curve
 from Modules.attention import *
 from Layers.expansions import *
 
+def parse_data(batch, device):
+    # get data from dataloader
+    try:
+        feature_1, feature_2, y = map(lambda x: x.to(device), batch)
+    except:
+        feature_1, y = map(lambda x: x.to(device), batch)
+        feature_2 = None
+
+    return feature_1, feature_2, y
+
 
 class ShuffleSelfAttentionModel(Model):
     def __init__(
-            self, save_path, log_path, n_depth, d_features, d_classifier, d_output, threshold,
+            self, save_path, log_path, n_depth, d_features, d_classifier, d_output, threshold=None,
             stack='ShuffleSelfAttention', expansion_layer='ChannelWiseConvExpansion', mode='1d', optimizer=None, **kwargs):
         '''*args: n_layers, n_head, n_channel, n_vchannel, dropout, use_bottleneck, d_bottleneck'''
 
@@ -73,10 +83,19 @@ class ShuffleSelfAttentionModel(Model):
         self.early_stopping = EarlyStopping(patience=50)
 
         # --------------------- logging and tensorboard -------------------- #
-
+        self.set_logger()
+        self.set_summary_writer()
         # ---------------------------- END INIT ---------------------------- #
 
-    def train_epoch(self, train_dataloader, eval_dataloader, device, smothing):
+    def checkpoint(self, step):
+        checkpoint = {
+            'model_state_dict': self.model.state_dict(),
+            'classifier_state_dict': self.classifier.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'global_step': step}
+        return checkpoint
+
+    def train_epoch(self, train_dataloader, eval_dataloader, device, smothing, earlystop):
         ''' Epoch operation in training phase'''
 
         if device == 'cuda':
@@ -93,10 +112,9 @@ class ShuffleSelfAttentionModel(Model):
                 train_dataloader, mininterval=1,
                 desc='  - (Training)   ', leave=False):  # training_data should be a iterable
 
-
-
             # get data from dataloader
-            feature_1, feature_2, y = map(lambda x: x.to(device), batch)
+
+            feature_1, feature_2, y = parse_data(batch, device)
 
             batch_size = len(feature_1)
 
@@ -112,7 +130,6 @@ class ShuffleSelfAttentionModel(Model):
                 loss = mse_loss(pred, y)
 
             else:
-                '''Do we need to apply softmax before calculating the loss?'''
                 pred = logits
                 loss = cross_entropy_loss(pred, y, smoothing=smothing)
 
@@ -134,13 +151,18 @@ class ShuffleSelfAttentionModel(Model):
 
             if state_dict['step_to_print']:
                 self.train_logger.info(
-                    '[TRAINING]   - batch: %5d, loss: %3.4f, acc: %1.4f, pre: %1.4f, rec: %1.4f' % (
-                        batch_counter, loss, acc, precision[1], recall[1]))
+                    '[TRAINING]   - step: %5d, loss: %3.4f, acc: %1.4f, pre: %1.4f, rec: %1.4f' % (
+                        state_dict['step'], loss, acc, precision[1], recall[1]))
+                self.summary_writer.add_scalar('loss/train', loss, state_dict['step'])
+                self.summary_writer.add_scalar('acc/train', acc, state_dict['step'])
+                self.summary_writer.add_scalar('precision/train', precision[1], state_dict['step'])
+                self.summary_writer.add_scalar('recall/train', recall[1], state_dict['step'])
 
             if state_dict['step_to_evaluate']:
                 stop = self.val_epoch(eval_dataloader, device, state_dict['step'])
                 state_dict['step_to_stop'] = stop
-                if stop:
+
+                if earlystop & stop:
                     break
 
             if self.controller.current_step == self.controller.max_step:
@@ -170,9 +192,9 @@ class ShuffleSelfAttentionModel(Model):
                     dataloader, mininterval=5,
                     desc='  - (Evaluation)   ', leave=False):  # training_data should be a iterable
 
-
                 # get data from dataloader
-                feature_1, feature_2, y = map(lambda x: x.to(device), batch)
+                feature_1, feature_2, y = parse_data(batch, device)
+
                 batch_size = len(feature_1)
 
                 # get logits
@@ -206,39 +228,41 @@ class ShuffleSelfAttentionModel(Model):
             # get evaluation results from the evaluator
             loss_avg, acc_avg, pre_avg, rec_avg = evaluator.avg_results()
 
-            self.train_logger.info(
-                '[EVALUATION] - eval_loss: %3.4f, acc: %1.4f, pre: %1.4f, rec: %1.4f' % (
-                    loss_avg, acc_avg, pre_avg, rec_avg))
+            self.eval_logger.info(
+                '[EVALUATION] - step: %5d, loss: %3.4f, acc: %1.4f, pre: %1.4f, rec: %1.4f' % (
+                    step, loss_avg, acc_avg, pre_avg, rec_avg))
+            self.summary_writer.add_scalar('loss/eval', loss_avg, step)
+            self.summary_writer.add_scalar('acc/eval', acc_avg, step)
+            self.summary_writer.add_scalar('precision/eval', pre_avg, step)
+            self.summary_writer.add_scalar('precision/eval', rec_avg, step)
+
 
             state_dict = self.early_stopping(loss_avg)
 
             if state_dict['save']:
-                checkpoint = {
-                    'model_state_dict': self.model.state_dict(),
-                    'classifier_state_dict': self.classifier.state_dict(),
-                    'optimizer_state_dict': self.optimizer.state_dict(),
-                    'global_step': step}
+                checkpoint = self.checkpoint(step)
                 self.save_model(checkpoint, self.save_path + '-step-%d_loss-%.5f'%(step,loss_avg))
 
             return state_dict['break']
 
-    def train(self, epoch, train_dataloader, eval_dataloader, device, smoothing, save_mode):
-        # set logger
-        self.set_logger()
+    def train(self, max_epoch, train_dataloader, eval_dataloader, device,
+              smoothing=False, earlystop=False, save_mode='best'):
 
         assert save_mode in ['all', 'best']
         # train for n epoch
-        for epoch_i in range(epoch):
+        for epoch_i in range(max_epoch):
             print('[ Epoch', epoch_i, ']')
             # set current epoch
             self.controller.set_epoch(epoch_i + 1)
             # train for on epoch
-            state_dict = self.train_epoch(train_dataloader, eval_dataloader, device, smoothing)
+            state_dict = self.train_epoch(train_dataloader, eval_dataloader, device, smoothing, earlystop)
 
-            self.val_epoch(eval_dataloader, device, plot=True)
+            # if state_dict['step_to_stop']:
+            #     break
 
-            if state_dict['step_to_stop']:
-                break
+        checkpoint = self.checkpoint(state_dict['step'])
+
+        self.save_model(checkpoint, self.save_path + '-step-%d' % state_dict['step'])
 
         self.train_logger.info('[INFO]: Finish Training, ends with %d epoch(s) and %d batches, in total %d training steps.' % (
             state_dict['epoch'] - 1, state_dict['batch'], state_dict['step']))
@@ -258,8 +282,7 @@ class ShuffleSelfAttentionModel(Model):
                     data_loader,
                     desc='  - (Testing)   ', leave=False):
 
-                # get data from dataloader
-                feature_1, feature_2, y = map(lambda x: x.to(device), batch)
+                feature_1, feature_2, y = parse_data(batch, device)
 
                 # get logits
                 logits, attn = self.model(feature_1, feature_2)
@@ -270,7 +293,7 @@ class ShuffleSelfAttentionModel(Model):
                 if activation != None:
                     pred = activation(logits)
                 else:
-                    pred = logits
+                    pred = logits.softmax(dim=-1)
                 pred_list += pred.tolist()
                 real_list += y.tolist()
 
