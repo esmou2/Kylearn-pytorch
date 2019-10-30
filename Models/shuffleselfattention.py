@@ -234,7 +234,7 @@ class ShuffleSelfAttentionModel(Model):
             self.summary_writer.add_scalar('loss/eval', loss_avg, step)
             self.summary_writer.add_scalar('acc/eval', acc_avg, step)
             self.summary_writer.add_scalar('precision/eval', pre_avg, step)
-            self.summary_writer.add_scalar('precision/eval', rec_avg, step)
+            self.summary_writer.add_scalar('recall/eval', rec_avg, step)
 
 
             state_dict = self.early_stopping(loss_avg)
