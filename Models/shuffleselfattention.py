@@ -1,4 +1,4 @@
-from torch.optim.adam import Adam
+from torch.optim.adamw import AdamW
 from Training.losses import *
 from Training.evaluation import accuracy, precision_recall, Evaluator
 from Training.control import TrainingControl, EarlyStopping
@@ -76,7 +76,7 @@ class ShuffleSelfAttentionModel(Model):
         # ---------------------------- Optimizer --------------------------- #
         self.parameters = list(self.model.parameters()) + list(self.classifier.parameters())
         if optimizer == None:
-            self.optimizer = Adam(self.parameters, lr=0.001, betas=(0.9, 0.999))
+            self.optimizer = AdamW(self.parameters, lr=0.002, betas=(0.9, 0.999),weight_decay=0.01)
 
         # ------------------------ training control ------------------------ #
         self.controller = TrainingControl(max_step=100000, evaluate_every_nstep=100, print_every_nstep=10)
