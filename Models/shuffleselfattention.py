@@ -62,14 +62,20 @@ class ShuffleSelfAttentionModel(Model):
         # ------------------------------ CUDA ------------------------------ #
         # If GPU available, move the graph to GPU(s)
 
-        # device_ids = list(range(torch.cuda.device_count()))
-        # self.model = nn.DataParallel(self.model, device_ids)
-        # self.fc1 = nn.DataParallel(self.fc1, device_ids)
-        # self.fc2 = nn.DataParallel(self.fc2, device_ids)]
         self.CUDA_AVAILABLE = self.check_cuda()
         if self.CUDA_AVAILABLE:
-            self.model.cuda()
-            self.classifier.cuda()
+            # self.model.cuda()
+            # self.classifier.cuda()
+
+            device_ids = list(range(torch.cuda.device_count()))
+            self.model = nn.DataParallel(self.model, device_ids)
+            self.classifier = nn.DataParallel(self.classifier, device_ids)
+            self.model.to('cuda')
+            self.classifier.to('cuda')
+            assert (next(self.model.parameters()).is_cuda)
+            assert (next(self.classifier.parameters()).is_cuda)
+            pass
+
         else:
             print('CUDA not found or not enabled, use CPU instead')
 
