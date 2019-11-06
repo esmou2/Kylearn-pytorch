@@ -1,14 +1,15 @@
+from framework.model import Model
+from Modules.linear import LinearClassifier
+from Modules.attention import *
+from Layers.expansions import *
 from torch.optim.adamw import AdamW
 from Training.losses import *
 from Training.evaluation import accuracy, precision_recall, Evaluator
 from Training.control import TrainingControl, EarlyStopping
-from Modules.linear import LinearClassifier
-from framework.model import Model
 from tqdm import tqdm
 from utils.plot_curves import precision_recall as pr
 from utils.plot_curves import plot_pr_curve
-from Modules.attention import *
-from Layers.expansions import *
+
 
 def parse_data(batch, device):
     # get data from dataloader
@@ -82,7 +83,7 @@ class ShuffleSelfAttentionModel(Model):
         # ---------------------------- Optimizer --------------------------- #
         self.parameters = list(self.model.parameters()) + list(self.classifier.parameters())
         if optimizer == None:
-            self.optimizer = AdamW(self.parameters, lr=0.002, betas=(0.9, 0.999),weight_decay=0.01)
+            self.optimizer = AdamW(self.parameters, lr=0.002, betas=(0.9, 0.999),weight_decay=0.001)
 
         # ------------------------ training control ------------------------ #
         self.controller = TrainingControl(max_step=100000, evaluate_every_nstep=100, print_every_nstep=10)
