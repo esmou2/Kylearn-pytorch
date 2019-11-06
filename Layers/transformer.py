@@ -3,13 +3,29 @@ import torch.nn as nn
 import numpy as np
 
 def get_non_pad_mask(seq, padding_idx=0):
+    '''
+        Arguments:
+            seq {batch, length} -- the word index of the sequence
+            padding_idx -- padding symbol
+
+        Returns:
+            mask {Tensor, shape: [batch, length, 1]} -- non padding mask, 1 means not padding position while 0 means padding position
+    '''
     assert seq.dim() == 2
     mask = seq.ne(padding_idx).type(torch.float)
     return mask.unsqueeze(-1)
 
 
 def get_sinusoid_encoding_table(n_position, d_hid, padding_idx=None):
-    ''' Sinusoid position encoding table '''
+    '''
+        Arguments:
+            n_position {Int} -- the maximum position
+            d_hid {Int} -- the dimension of the embedding
+            padding_idx -- padding symbol
+
+        Returns:
+            sinusoid_table {Tensor, shape: [n_position+1, d_hid]} -- sinusoid encoding table
+    '''
     n_position += 1
 
     def cal_angle(position, hid_idx):
@@ -34,12 +50,12 @@ def get_attn_key_pad_mask(seq_k, seq_q, padding_idx=0):
     '''
         For masking out the padding part of key sequence.
         Arguments:
-            seq_k {Tensor, shape [batch, k]} -- key sequence
-            seq_q {Tensor, shape [batch, q]} -- query sequence
+            seq_k {Tensor, shape [batch, len_k]} -- key sequence
+            seq_q {Tensor, shape [batch, len_q]} -- query sequence
 
         Returns:
-            padding_mask {Tensor, shape [batch, q, k]} -- mask matrix
-            key mask [batch, k] -> expand q times [batch, q, k]
+            padding_mask {Tensor, shape [batch, len_q, len_k]} -- mask matrix
+            key mask [batch, k] -> expand q times [batch, len_q, len_k]
 
     '''
 
@@ -67,7 +83,10 @@ class EncoderLayer(nn.Module):
                  use_bottleneck=False, d_bottleneck=128):
         super().__init__()
 
-        self.self_attn = MultiHeadAttention(n_head, d_features, d_features, d_features, dropout)
+        # To reduce computation
+        d_reduce_param = np.floor(d_features / n_head).astype(int)
+
+        self.self_attn = MultiHeadAttention(n_head, d_features, d_reduce_param, d_reduce_param, dropout)
         if use_bottleneck:
             self.bottleneck = PositionwiseFeedForward(d_features, d_bottleneck, dropout=dropout)
 
@@ -76,11 +95,11 @@ class EncoderLayer(nn.Module):
             Arguments:
                 enc_input {Tensor, shape [batch, length, d_features]} -- input
                 non_pad_mask {Tensor, shape [batch, length, 1]} -- index of which position in a sequence is a padding
-                slf_attn_mask {Tensor, shape [batch, q_length, k_length]} -- self attention mask
+                slf_attn_mask {Tensor, shape [batch, length, length]} -- self attention mask
 
             Returns:
-                enc_output {Tensor, shape [batch, q_length, d_features]} -- output
-                encoder_self_attn {n_head * batch, q_length, k_length}
+                enc_output {Tensor, shape [batch, length, d_features]} -- output
+                encoder_self_attn {n_head * batch, length, length} -- n_head self attention matrices
         '''
 
         enc_output, encoder_self_attn = self.self_attn(
@@ -99,24 +118,28 @@ class DecoderLayer(nn.Module):
     # def __init__(self, d_model, d_inner, n_head, d_k, d_v, dropout=0.1):
     def __init__(self, d_features, n_head, dropout,
                  use_bottleneck=False, d_bottleneck=128):
-        super(DecoderLayer, self).__init__()
-        self.slf_attn = MultiHeadAttention(n_head, d_features, d_features, d_features, dropout=dropout)
-        self.enc_attn = MultiHeadAttention(n_head, d_features, d_features, d_features, dropout=dropout)
+        super().__init__()
+
+        # To reduce computation
+        d_reduce_param = np.floor(d_features / n_head).astype(int)
+
+        self.slf_attn = MultiHeadAttention(n_head, d_features, d_reduce_param, d_reduce_param, dropout=dropout)
+        self.enc_attn = MultiHeadAttention(n_head, d_features, d_reduce_param, d_reduce_param, dropout=dropout)
         if use_bottleneck:
             self.bottleneck = PositionwiseFeedForward(d_features, d_bottleneck, dropout=dropout)
 
     def forward(self, dec_input, enc_output, non_pad_mask=None, slf_attn_mask=None, dec_enc_attn_mask=None):
         '''
             Arguments:
-                dec_input {Tensor, shape [batch, in_length, d_features]} -- target input
-                enc_output {Tensor, shape [batch, tg_length, d_features]} --
+                dec_input {Tensor, shape [batch, in_length, d_features]} -- decoder input
+                enc_output {Tensor, shape [batch, tg_length, d_features]} -- encoder output
                 non_pad_mask {Tensor, shape [batch, tg_length, 1]} -- index of which position in a sequence is a padding
                 slf_attn_mask {Tensor, shape [batch, tg_length, tg_length]} -- self attention mask
                 dec_enc_attn_mask {Tensor, shape [batch, tg_length, in_length]}
             Returns:
-                dec_output {Tensor, shape [batch_size, seq_length, w2v_length]} -- output
-                non_pad_mask {Tensor, shape [n_head, seq_length, 1]} --
-                slf_attn_mask {Tensor, shape [batch_size, seq_length, seq_length]} --
+                dec_output {Tensor, shape [batch_size, seq_length, d_features]} -- output
+                dec_slf_attn {Tensor, shape [n_head, seq_length, 1]} -- decoder self attention
+                dec_enc_attn {Tensor, shape [batch_size, seq_length, seq_length]} -- decoder-encoder attention
         '''
 
         dec_output, dec_slf_attn = self.slf_attn(
@@ -193,13 +216,13 @@ class MultiHeadAttention(nn.Module):
     def forward(self, query, key, value, mask=None):
         '''
             Arguments:
-                query {Tensor, shape [batch, q_length, embedding_length]} -- query
-                key {Tensor, shape [batch, k_length, embedding_length]} -- key
-                value {Tensor, shape [batch, v_length, embedding_length]} -- value
+                query {Tensor, shape [batch, q_length, d_features]} -- query
+                key {Tensor, shape [batch, k_length, d_features]} -- key
+                value {Tensor, shape [batch, v_length, d_features]} -- value
                 mask {Tensor, shape [batch, q_length, k_length]} --self attn mask
 
             Returns:
-                output {Tensor, shape [batch, q_length, embedding_length]} -- output
+                output {Tensor, shape [batch, q_length, d_features]} -- output
                 attn {Tensor, shape [n_head * batch, q_length, k_length] -- self attention
         '''
         d_k, d_v, n_head = self.d_k, self.d_v, self.n_head
@@ -221,7 +244,9 @@ class MultiHeadAttention(nn.Module):
         key = key.permute(2, 0, 1, 3).contiguous().view(-1, len_k, d_k)  # (n*b) x lk x dk
         value = value.permute(2, 0, 1, 3).contiguous().view(-1, len_v, d_v)  # (n*b) x lv x dv
 
-        mask = mask.repeat(n_head, 1, 1)  # [n_head * batch_size, seq_length, seq_length]
+        if len(mask) != 0:
+            mask = mask.repeat(n_head, 1, 1)  # [n_head * batch_size, seq_length, seq_length]
+
         output, attn = self.attention(query, key, value, mask=mask)
 
         output = output.view(n_head, sz_b, len_q, d_v)
@@ -234,7 +259,7 @@ class MultiHeadAttention(nn.Module):
 
 
 class PositionwiseFeedForward(nn.Module):
-    ''' A two-1x1 Conv-layer module '''
+    ''' A two-1x1 Conv-layer bottleneck module '''
 
     def __init__(self, d_in, d_hid, dropout=0.1):
         super().__init__()
@@ -246,10 +271,10 @@ class PositionwiseFeedForward(nn.Module):
     def forward(self, x):
         '''
             Arguments:
-                x {Tensor, shape [batch_size, length, embedding_length]}
+                x {Tensor, shape [batch_size, length, d_features]}
 
             Returns:
-                x {Tensor, shape [batch_size, length, embedding_length]}
+                x {Tensor, shape [batch_size, length, d_features]}
 
         '''
         residual = x
@@ -271,7 +296,15 @@ class SinusoidPositionEncoding(nn.Module):
             freeze=True)
 
     def forward(self, x):
-        return self.position_enc(x)
+        '''
+            Argument:
+                x {Tensor, shape: [batch, length]} -- sequence position index masked
+            Returns:
+                x {Tensor, shape: [batch, length, d_features]} -- positional encoding
+        '''
+        x = self.position_enc(x)
+        pass
+        return x
 
 class LinearPositionEncoding(nn.Module):
 
