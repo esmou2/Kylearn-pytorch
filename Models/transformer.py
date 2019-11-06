@@ -63,12 +63,13 @@ class TransormerClassifierModel(Model):
         self.model = stack_dict[stack](encoding_dict[position_encode], d_features=d_features, max_seq_length=max_length, d_meta=d_meta, **kwargs)
         
         # --------------------------- Embedding  --------------------------- #
-        if embedding != None:
+        if len(embedding) == 0:
+            self.USE_EMBEDDING = False
+
+        else:
             self.word_embedding = nn.Embedding.from_pretrained(embedding)
             self.USE_EMBEDDING = True
-        else:
-            self.USE_EMBEDDING = False
-            
+
         # --------------------------- Classifier --------------------------- #
         self.classifier = LinearClassifier(d_features * max_length, d_classifier, n_classes)
         
@@ -137,7 +138,7 @@ class TransormerClassifierModel(Model):
 
             # forward
             self.optimizer.zero_grad()
-            logits, attn = self.model(input_feature_sequence, position)
+            logits, attn = self.model(input_feature_sequence, position, non_pad_mask, slf_attn_mask)
             logits = logits.view(batch_size, -1)
             logits = self.classifier(logits)
 
