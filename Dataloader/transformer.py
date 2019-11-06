@@ -88,17 +88,3 @@ class TransformerClsDataset(Dataset):
         return sample
 
 
-class TransformerClsDataLoader():
-    def __init__(self, dataset, batch_size, shuffle=True):
-        self.dataset = dataset
-        self.loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=4)
-
-    def train_generator(self):
-        for i, batch in enumerate(self.loader):
-            yield i, batch
-
-    def eval_data(self):
-        return self.dataset.eval_set
-
-    def test_data(self):
-        return self.dataset.test_set
