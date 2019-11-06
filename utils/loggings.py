@@ -1,7 +1,7 @@
 import logging
 class logger():
-    def __init__(self, log_path, level=logging.INFO, mode='w', format = "%(asctime)s - %(levelname)s: %(message)s"):
-        self.logging = logging.getLogger()
+    def __init__(self, logger_name, log_path, mode, level=logging.INFO, format = "%(asctime)s - %(message)s"):
+        self.logging = logging.getLogger(logger_name)
         self.logging.setLevel(level)
         fh = logging.FileHandler(log_path, mode)
         fh.setLevel(level)

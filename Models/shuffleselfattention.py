@@ -1,81 +1,73 @@
 from framework.model import Model
 from Modules.linear import LinearClassifier
-from Modules.transformer import *
-from Layers.transformer import *
+from Modules.attention import *
+from Layers.expansions import *
 from torch.optim.adamw import AdamW
 from Training.losses import *
 from Training.evaluation import accuracy, precision_recall, Evaluator
 from Training.control import TrainingControl, EarlyStopping
 from tqdm import tqdm
-
-def parse_data_enc(input_sequence, embedding):
-    '''
-    Returns:
-        enc_output {Tensor, [batch_size, seq_length, d_v]} --
-        non_pad_mask {Tensor, [n_head, seq_length, 1]} --
-        slf_attn_mask {Tensor, [batch_size, seq_length, seq_length]} --
-    '''
-
-    slf_attn_mask = get_attn_key_pad_mask(seq_k=input_sequence, seq_q=input_sequence,
-                                          padding_idx=0)  # [batch_size, seq_length, seq_length]
-    non_pad_mask = get_non_pad_mask(input_sequence, padding_idx=0)  # [batch_size, seq_length, 1]
-
-    embedding_sequence = embedding(input_sequence)
-
-    return embedding_sequence, non_pad_mask, slf_attn_mask
+from utils.plot_curves import precision_recall as pr
+from utils.plot_curves import plot_pr_curve
 
 
-def parse_data_dec(input_sequence, target_sequence, embedding):
-    non_pad_mask = get_non_pad_mask(target_sequence)
+def parse_data(batch, device):
+    # get data from dataloader
+    try:
+        feature_1, feature_2, y = map(lambda x: x.to(device), batch)
+    except:
+        feature_1, y = map(lambda x: x.to(device), batch)
+        feature_2 = None
 
-    slf_attn_mask_subseq = get_subsequent_mask(target_sequence)
-    slf_attn_mask_keypad = get_attn_key_pad_mask(seq_k=target_sequence, seq_q=target_sequence)
-    slf_attn_mask = (slf_attn_mask_keypad + slf_attn_mask_subseq).gt(0)
-
-    dec_enc_attn_mask = get_attn_key_pad_mask(seq_k=input_sequence, seq_q=target_sequence)
-
-    embedding_sequence = embedding(target_sequence)
-    return embedding_sequence, non_pad_mask, slf_attn_mask, dec_enc_attn_mask
+    return feature_1, feature_2, y
 
 
-class TransormerClassifierModel(Model):
+class ShuffleSelfAttentionModel(Model):
     def __init__(
-            self, save_path, log_path, d_features, d_meta, max_length, d_classifier, n_classes, threshold=None, embedding=None,
-            stack='Encoder', position_encode='SinusoidPositionEncoding', optimizer=None, **kwargs):
-        '''**kwargs: n_layers, n_head, dropout, use_bottleneck, d_bottleneck'''
+            self, save_path, log_path, n_depth, d_features, d_classifier, d_output, threshold=None,
+            stack='ShuffleSelfAttention', expansion_layer='ChannelWiseConvExpansion', mode='1d', optimizer=None, **kwargs):
+        '''*args: n_layers, n_head, n_channel, n_vchannel, dropout, use_bottleneck, d_bottleneck'''
 
         super().__init__(save_path, log_path)
-        self.d_output = n_classes
+        self.d_output = d_output
         self.threshold = threshold
-        self.max_length = max_length
-        
+
         # ----------------------------- Model ------------------------------ #
         stack_dict = {
-            'Encoder': Encoder,
-            'Transformer': Transformer
+            'ReactionAttention': ReactionAttentionStack,
+            'SelfAttention': SelfAttentionStack,
+            'Alternate': AlternateStack,
+            'Parallel': ParallelStack,
+            'ShuffleSelfAttention': ShuffleSelfAttentionStack
         }
-        encoding_dict = {
-            'SinusoidPositionEncoding': SinusoidPositionEncoding,
-            'LinearPositionEncoding': LinearPositionEncoding
+        expansion_dict = {
+            'LinearExpansion': LinearExpansion,
+            'ReduceParamLinearExpansion': ReduceParamLinearExpansion,
+            'ConvExpansion': ConvExpansion,
+            'LinearConvExpansion': LinearConvExpansion,
+            'ShuffleConvExpansion': ShuffleConvExpansion,
+            'ChannelWiseConvExpansion': ChannelWiseConvExpansion,
         }
 
-        self.model = stack_dict[stack](encoding_dict[position_encode], d_features=d_features, max_seq_length=max_length, d_meta=d_meta, **kwargs)
-        
-        # --------------------------- Embedding  --------------------------- #
-        if len(embedding) == 0:
-            self.USE_EMBEDDING = False
-
-        else:
-            self.word_embedding = nn.Embedding.from_pretrained(embedding)
-            self.USE_EMBEDDING = True
+        self.model = stack_dict[stack](expansion_dict[expansion_layer], n_depth=n_depth, d_features=d_features,
+                                       mode=mode, **kwargs)
 
         # --------------------------- Classifier --------------------------- #
-        self.classifier = LinearClassifier(d_features * max_length, d_classifier, n_classes)
-        
+        if mode == '1d':
+            self.classifier = LinearClassifier(d_features, d_classifier, d_output)
+        elif mode == '2d':
+            self.classifier = LinearClassifier(n_depth * d_features, d_classifier, d_output)
+        else:
+            self.classifier = None
+
         # ------------------------------ CUDA ------------------------------ #
         # If GPU available, move the graph to GPU(s)
+
         self.CUDA_AVAILABLE = self.check_cuda()
         if self.CUDA_AVAILABLE:
+            # self.model.cuda()
+            # self.classifier.cuda()
+
             device_ids = list(range(torch.cuda.device_count()))
             self.model = nn.DataParallel(self.model, device_ids)
             self.classifier = nn.DataParallel(self.classifier, device_ids)
@@ -91,7 +83,7 @@ class TransormerClassifierModel(Model):
         # ---------------------------- Optimizer --------------------------- #
         self.parameters = list(self.model.parameters()) + list(self.classifier.parameters())
         if optimizer == None:
-            self.optimizer = AdamW(self.parameters, lr=0.002, betas=(0.9, 0.999), weight_decay=0.001)
+            self.optimizer = AdamW(self.parameters, lr=0.002, betas=(0.9, 0.999),weight_decay=0.001)
 
         # ------------------------ training control ------------------------ #
         self.controller = TrainingControl(max_step=100000, evaluate_every_nstep=100, print_every_nstep=10)
@@ -129,15 +121,13 @@ class TransormerClassifierModel(Model):
 
             # get data from dataloader
 
-            index, position, y = map(lambda x: x.to(device), batch)
-            
-            batch_size = len(index)
+            feature_1, feature_2, y = parse_data(batch, device)
 
-            input_feature_sequence, non_pad_mask, slf_attn_mask = parse_data_enc(index, self.word_embedding)
+            batch_size = len(feature_1)
 
             # forward
             self.optimizer.zero_grad()
-            logits, attn = self.model(input_feature_sequence, position, non_pad_mask, slf_attn_mask)
+            logits, attn = self.model(feature_1, feature_2)
             logits = logits.view(batch_size, -1)
             logits = self.classifier(logits)
 
@@ -209,14 +199,13 @@ class TransormerClassifierModel(Model):
                     dataloader, mininterval=5,
                     desc='  - (Evaluation)   ', leave=False):  # training_data should be a iterable
 
-                index, position, y = map(lambda x: x.to(device), batch)
+                # get data from dataloader
+                feature_1, feature_2, y = parse_data(batch, device)
 
-                batch_size = len(index)
-
-                input_feature_sequence, non_pad_mask, slf_attn_mask = parse_data_enc(index, self.word_embedding)
+                batch_size = len(feature_1)
 
                 # get logits
-                logits, attn = self.model(input_feature_sequence, position, non_pad_mask, slf_attn_mask)
+                logits, attn = self.model(feature_1, feature_2)
                 logits = logits.view(batch_size, -1)
                 logits = self.classifier(logits)
 
@@ -235,13 +224,13 @@ class TransormerClassifierModel(Model):
                 evaluator(loss.item(), acc.item(), precision[1].item(), recall[1].item())
 
                 '''append the results to the predict / real list for drawing ROC or PR curve.'''
-            #     if plot:
-            #         pred_list += pred.tolist()
-            #         real_list += y.tolist()
-            #
-            # if plot:
-            #     area, precisions, recalls, thresholds = pr(pred_list, real_list)
-            #     plot_pr_curve(recalls, precisions, auc=area)
+                if plot:
+                    pred_list += pred.tolist()
+                    real_list += y.tolist()
+
+            if plot:
+                area, precisions, recalls, thresholds = pr(pred_list, real_list)
+                plot_pr_curve(recalls, precisions, auc=area)
 
             # get evaluation results from the evaluator
             loss_avg, acc_avg, pre_avg, rec_avg = evaluator.avg_results()
@@ -263,14 +252,10 @@ class TransormerClassifierModel(Model):
 
             return state_dict['break']
 
-
     def train(self, max_epoch, train_dataloader, eval_dataloader, device,
               smoothing=False, earlystop=False, save_mode='best'):
+
         assert save_mode in ['all', 'best']
-
-        if self.USE_EMBEDDING:
-            self.word_embedding = self.word_embedding.to(device)
-
         # train for n epoch
         for epoch_i in range(max_epoch):
             print('[ Epoch', epoch_i, ']')
@@ -291,9 +276,6 @@ class TransormerClassifierModel(Model):
 
     def get_predictions(self, data_loader, device, max_batches=None, activation=None):
 
-        if self.USE_EMBEDDING:
-            self.word_embedding = self.word_embedding.to(device)
-
         pred_list = []
         real_list = []
 
@@ -307,12 +289,10 @@ class TransormerClassifierModel(Model):
                     data_loader,
                     desc='  - (Testing)   ', leave=False):
 
-                index, position, y = map(lambda x: x.to(device), batch)
-
-                input_feature_sequence, non_pad_mask, slf_attn_mask = parse_data_enc(index, self.word_embedding)
+                feature_1, feature_2, y = parse_data(batch, device)
 
                 # get logits
-                logits, attn = self.model(input_feature_sequence, position, non_pad_mask, slf_attn_mask)
+                logits, attn = self.model(feature_1, feature_2)
                 logits = logits.view(logits.shape[0], -1)
                 logits = self.classifier(logits)
 

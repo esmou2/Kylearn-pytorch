@@ -29,9 +29,13 @@ def accuracy(pred, real, threshold=None):
         n = real.shape[0]
         pred = pred.argmax(dim=-1).view(n, -1)
         real = real.view(n, -1)
-        return (pred == real).float().mean()
+        acc = pred.byte() == real.byte()
+        acc = (acc).float().mean()
+        return acc
     else:
-        return ((pred > threshold).byte() == real.byte()).float().mean()
+        acc = (pred > threshold).byte() == real.byte()
+        acc = (acc).float().mean()
+        return acc
 
 
 
@@ -54,8 +58,8 @@ def confusion_matrix(pred, real, threshold=None):
     return cm
 
 
-def precision_racall(pred, real, threshold=None, average='macro'):
-    n_sample = real.shape[0]
+def precision_recall(pred, real, d_output, threshold=None, average='macro', eps = 1e-6):
+    n = real.shape[0]
     dim = real.shape[-1]
     if dim == 1:
         if threshold != None:
@@ -63,18 +67,18 @@ def precision_racall(pred, real, threshold=None, average='macro'):
             pred = one_hot_embedding(pred, 2)
             real = one_hot_embedding(real, 2)
         else:
-            pred = one_hot_embedding(pred, real.max(-1))
-            real = one_hot_embedding(real, real.max(-1))
+            pred = one_hot_embedding(torch.argmax(pred, -1).view(n, -1), d_output)
+            real = one_hot_embedding(real, d_output)
 
     tp = (pred & real)
     tp_count = tp.sum(0).float()
-    fp_count = (pred - tp).sum(0).float()
-    fn_count = (real - tp).sum(0).float()
+    fp_count = (pred - tp).sum(0).float() + eps
+    fn_count = (real - tp).sum(0).float() + eps
     precision = tp_count / (tp_count + fp_count)
     recall = tp_count / (tp_count + fn_count)
 
     if threshold != None:
-        return precision[1], recall[1], precision[1], recall[1]
+        return precision, recall, precision, recall
 
     else:
         if average == 'macro':
@@ -82,7 +86,30 @@ def precision_racall(pred, real, threshold=None, average='macro'):
             recall_avg = precision.mean()
 
         else:
-            precision_avg = tp.sum(0).sum() / n_sample
+            precision_avg = tp.sum(0).sum() / n
             recall_avg = precision_avg
 
     return precision, recall, precision_avg, recall_avg
+
+class Evaluator():
+    def __init__(self):
+        self.total_loss = 0
+        self.total_acc = 0
+        self.total_pre = 0
+        self.total_rec = 0
+        self.batch_counter = 0
+
+
+    def __call__(self, loss, acc, precision, recall):
+        self.total_loss += loss
+        self.total_acc += acc
+        self.total_pre += precision
+        self.total_rec += recall
+        self.batch_counter += 1
+
+    def avg_results(self):
+        loss_avg = self.total_loss / self.batch_counter
+        acc_avg = self.total_acc / self.batch_counter
+        pre_avg = self.total_pre / self.batch_counter
+        rec_avg = self.total_rec / self.batch_counter
+        return loss_avg, acc_avg, pre_avg, rec_avg

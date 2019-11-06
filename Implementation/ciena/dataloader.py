@@ -4,15 +4,16 @@ from torch.utils.data.sampler import SubsetRandomSampler
 from Dataloader.samplers import BalanceSampler
 import numpy as np
 
-
-class ReactionDataset(Dataset):
-    def __init__(self, f1_path, f2_path, y_path):
-        super(ReactionDataset, self).__init__()
+class CienaDataset(Dataset):
+    def __init__(self, f1_path, y_path):
+        super(CienaDataset, self).__init__()
 
         # load data
         self.feature1 = np.load(f1_path)
-        self.feature2 = np.load(f2_path)
         self.y = np.load(y_path)
+
+        if self.y.ndim == 1:
+            self.y = self.y.reshape([-1,1])
 
     def __len__(self):
         return len(self.y)
@@ -21,46 +22,43 @@ class ReactionDataset(Dataset):
         if torch.is_tensor(index):
             index = index.tolist()
         sample = (torch.from_numpy(self.feature1[index, :]).float(),
-                  torch.from_numpy(self.feature2[index, :]).float(),
                   torch.from_numpy(self.y[index, :]).float())
 
         return sample
 
     def get_feature_dim(self):
-        return self.feature1.shape[-1], self.feature2.shape[-1]
+        return self.feature1.shape[-1]
 
 
-class ReactionDataloader():
+class CienaDataloader():
     def __init__(self, file_dir, batch_size, val_size, shuffle=True):
-        # feature1 shape [?, n_features]
-        # feature2 shape [?, m_features]
-        # y shape [?, 1]
 
         # Load training data
-        train_set = ReactionDataset(file_dir + 'X_train.npy', file_dir + 'dev_train.npy', file_dir + 'y_train.npy')
+        train_set = CienaDataset(file_dir + 'X_train.npy', file_dir + 'y_train.npy')
         self.dims = train_set.get_feature_dim()
 
+        # Load test data
+        test_set = CienaDataset(file_dir + 'X_test.npy', file_dir + 'y_test.npy')
+
         train_size = len(train_set)
-        indices = list(range(train_size))
-        split = int(np.floor(val_size * train_size))
+        train_indices = list(range(train_size))
+
+        test_size = len(test_set)
+        test_indices = list(range(test_size))
+        split = int(np.floor(val_size * test_size))
+
         if shuffle:
             np.random.seed(42)
-            np.random.shuffle(indices)
-        train_indices, val_indices = indices[split:], indices[:split]
+            np.random.shuffle(test_indices)
+
+        test_indices, eval_indices = test_indices[split:], test_indices[:split]
 
         train_sampler = SubsetRandomSampler(train_indices)
-        valid_sampler = SubsetRandomSampler(val_indices)
-
         # train_sampler = BalanceSampler(train_set.y, train_indices)
-        # valid_sampler = BalanceSampler(train_set.y, val_indices)
-
+        valid_sampler = SubsetRandomSampler(eval_indices)
 
         self.train_loader = DataLoader(train_set, batch_size, sampler=train_sampler, num_workers=4)
         self.val_loader = DataLoader(train_set, batch_size, sampler=valid_sampler, num_workers=4)
-
-        # Load test data
-        test_set = ReactionDataset(file_dir + 'X_test.npy', file_dir + 'dev_test.npy', file_dir + 'y_test.npy')
-
         self.test_loader = DataLoader(test_set, batch_size, num_workers=4)
 
     def train_dataloader(self):

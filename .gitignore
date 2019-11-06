@@ -49,6 +49,6 @@ venv/
 # env variables
 .env
 
-data*
-models*
-*logs*
+*data/
+*models/
+*logs/

@@ -1,153 +1,80 @@
-import torch
 import torch.nn as nn
-import numpy as np
 from Layers.transformer import EncoderLayer, DecoderLayer
-
-
-def get_non_pad_mask(seq, padding_idx=0):
-    assert seq.dim() == 2
-    mask = seq.ne(padding_idx).type(torch.float)
-    return mask.unsqueeze(-1)
-
-
-def get_sinusoid_encoding_table(n_position, d_hid, padding_idx=None):
-    ''' Sinusoid position encoding table '''
-    n_position += 1
-
-    def cal_angle(position, hid_idx):
-        return position / np.power(10000, 2 * (hid_idx // 2) / d_hid)
-
-    def get_posi_angle_vec(position):
-        return [cal_angle(position, hid_j) for hid_j in range(d_hid)]
-
-    sinusoid_table = np.array([get_posi_angle_vec(pos_i) for pos_i in range(n_position)])
-
-    sinusoid_table[:, 0::2] = np.sin(sinusoid_table[:, 0::2])  # dim 2i
-    sinusoid_table[:, 1::2] = np.cos(sinusoid_table[:, 1::2])  # dim 2i+1
-
-    if padding_idx is not None:
-        # zero vector for padding dimension
-        sinusoid_table[padding_idx] = 0.
-
-    return torch.FloatTensor(sinusoid_table)
-
-
-def get_attn_key_pad_mask(seq_k, seq_q, padding_idx=0):
-    '''
-        For masking out the padding part of key sequence.
-        Arguments:
-            seq_k {Tensor, shape [batch, k]} -- key sequence
-            seq_q {Tensor, shape [batch, q]} -- query sequence
-
-        Returns:
-            padding_mask {Tensor, shape [batch, q, k]} -- mask matrix
-            key mask [batch, k] -> expand q times [batch, q, k]
-
-    '''
-
-    # Expand to fit the shape of key query attention matrix.
-    len_q = seq_q.size(1)
-    padding_mask = seq_k.eq(padding_idx)
-    padding_mask = padding_mask.unsqueeze(1).expand(-1, len_q, -1)  # b x lq x lk
-
-    return padding_mask
-
-
-def get_subsequent_mask(seq):
-    ''' For masking out the subsequent info. '''
-
-    sz_b, len_s = seq.size()
-    subsequent_mask = torch.triu(
-        torch.ones((len_s, len_s), device=seq.device, dtype=torch.uint8), diagonal=1)
-    subsequent_mask = subsequent_mask.unsqueeze(0).expand(sz_b, -1, -1)  # b x ls x ls
-
-    return subsequent_mask
-
 
 class Encoder(nn.Module):
     ''' A encoder models with self attention mechanism. '''
 
     def __init__(
-            self, embedding,
-            len_max_seq, d_word_vec,
-            n_layers, n_head, d_k, d_v,
-            d_model, d_inner, dropout=0.1):
-
+            self, position_encoding_layer, n_layers, n_head, d_features, max_seq_length, d_meta, dropout=0.1, use_bottleneck=True, d_bottleneck=256):
         super().__init__()
 
-        self.word_embedding = nn.Embedding.from_pretrained(embedding)
 
-        self.position_enc = nn.Embedding.from_pretrained(
-            get_sinusoid_encoding_table(len_max_seq, d_word_vec, padding_idx=0),
-            freeze=True)
+        self.position_enc = position_encoding_layer(d_features=d_features, max_length=max_seq_length, d_meta=d_meta)
 
         self.layer_stack = nn.ModuleList([
-            EncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout)
+            EncoderLayer(d_features, n_head, dropout, use_bottleneck=use_bottleneck, d_bottleneck=d_bottleneck)
             for _ in range(n_layers)])
 
-    def forward(self, sequence, position, return_attns=False):
+    def forward(self, feature_sequence, position, non_pad_mask=None, slf_attn_mask=None):
+        '''
+            Arguments:
+                input_feature_sequence {Tensor, shape [batch, max_sequence_length, d_features]} -- input feature sequence
+                position {Tensor, shape [batch, max_sequence_length (, d_meta)]} -- input feature position sequence
+
+            Returns:
+                enc_output {Tensor, shape [batch, max_sequence_length, d_features]} -- encoder output (representation)
+                encoder_self_attn_list {List, length: n_layers} -- encoder self attention list,
+                each element is a Tensor with shape [n_head * batch, max_sequence_length, max_sequence_length]
+        '''
 
         encoder_self_attn_list = []
 
-        # -- Prepare masks
-        slf_attn_mask = get_attn_key_pad_mask(seq_k=sequence, seq_q=sequence,
-                                              padding_idx=0)  # [batch_size, seq_length, seq_length]
-        non_pad_mask = get_non_pad_mask(sequence, padding_idx=0)  # [batch_size, seq_length, 1]
-
-        # -- Forward
-        enc_output = self.word_embedding(sequence) + self.position_enc(position)
+        # Add position information at the beginning
+        enc_output = feature_sequence + self.position_enc(position)
 
         for enc_layer in self.layer_stack:
             enc_output, encoder_self_attn = enc_layer(
                 enc_output,
                 non_pad_mask=non_pad_mask,
                 slf_attn_mask=slf_attn_mask)
-            if return_attns:
-                encoder_self_attn_list += [encoder_self_attn]
 
-        if return_attns:
-            return enc_output, encoder_self_attn_list
-        return enc_output,
+            encoder_self_attn_list += [encoder_self_attn]
+
+        return enc_output, encoder_self_attn_list
 
 
 class Decoder(nn.Module):
     ''' A decoder models with self attention mechanism. '''
 
     def __init__(
-            self,
-            n_tgt_vocab, len_max_seq, d_word_vec,
-            n_layers, n_head, d_k, d_v,
-            d_model, d_inner, dropout=0.1):
+            self, position_encoding_layer, n_layers, n_head, d_features, max_seq_length, d_meta, dropout=0.1, use_bottleneck=True, d_bottleneck=256):
 
         super().__init__()
-        n_position = len_max_seq + 1
 
-        self.tgt_word_emb = nn.Embedding(
-            n_tgt_vocab, d_word_vec, padding_idx=0)
-
-        self.position_enc = nn.Embedding.from_pretrained(
-            get_sinusoid_encoding_table(n_position, d_word_vec, padding_idx=0),
-            freeze=True)
+        self.position_enc = position_encoding_layer(d_features=d_features, max_length=max_seq_length, d_meta=d_meta)
 
         self.layer_stack = nn.ModuleList([
-            DecoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout)
+            DecoderLayer(d_features, n_head, dropout, use_bottleneck=use_bottleneck, d_bottleneck=d_bottleneck)
             for _ in range(n_layers)])
 
-    def forward(self, tgt_seq, tgt_pos, src_seq, enc_output, return_attns=False):
+    def forward(self, target_feature_sequence, tg_position, enc_output, non_pad_mask=None, slf_attn_mask=None, dec_enc_attn_mask=None):
+        '''
+            Arguments:
+                target_feature_sequence {Tensor, shape [batch, max_sequence_length, d_features]} -- input feature sequence
+                tg_position {Tensor, shape [batch, max_sequence_length (, d_meta)]} -- input feature position sequence
+                enc_output {Tensor, shape [batch, max_sequence_length, d_features]} -- encoder output
+
+            Returns:
+                dec_output {Tensor, shape [batch, max_sequence_length, d_features]} -- decoder output (representation)
+                dec_slf_attn_list {List, length: n_layers} -- decoder self attention list,
+                each element is a Tensor with shape [n_head * batch, max_sequence_length, max_sequence_length]
+                dec_enc_attn_list {List, length: n_layers} -- decoder-encoder attention list,
+                each element is a Tensor with shape [n_head * batch, max_sequence_length, max_sequence_length]
+        '''
 
         dec_slf_attn_list, dec_enc_attn_list = [], []
 
-        # -- Prepare masks
-        non_pad_mask = get_non_pad_mask(tgt_seq)
-
-        slf_attn_mask_subseq = get_subsequent_mask(tgt_seq)
-        slf_attn_mask_keypad = get_attn_key_pad_mask(seq_k=tgt_seq, seq_q=tgt_seq)
-        slf_attn_mask = (slf_attn_mask_keypad + slf_attn_mask_subseq).gt(0)
-
-        dec_enc_attn_mask = get_attn_key_pad_mask(seq_k=src_seq, seq_q=tgt_seq)
-
-        # -- Forward
-        dec_output = self.tgt_word_emb(tgt_seq) + self.position_enc(tgt_pos)
+        dec_output = target_feature_sequence + self.position_enc(tg_position)
 
         for dec_layer in self.layer_stack:
             dec_output, dec_slf_attn, dec_enc_attn = dec_layer(
@@ -156,104 +83,43 @@ class Decoder(nn.Module):
                 slf_attn_mask=slf_attn_mask,
                 dec_enc_attn_mask=dec_enc_attn_mask)
 
-            if return_attns:
-                dec_slf_attn_list += [dec_slf_attn]
-                dec_enc_attn_list += [dec_enc_attn]
+            dec_slf_attn_list += [dec_slf_attn]
+            dec_enc_attn_list += [dec_enc_attn]
 
-        if return_attns:
-            return dec_output, dec_slf_attn_list, dec_enc_attn_list
-        return dec_output,
+        return dec_output, dec_slf_attn_list, dec_enc_attn_list
 
 
 class Transformer(nn.Module):
     ''' A sequence to sequence models with attention mechanism. '''
 
     def __init__(
-            self,
-            embedding, n_tgt_vocab, len_max_seq,
-            d_word_vec=512, d_model=512, d_inner=2048,
-            n_layers=6, n_head=8, d_k=64, d_v=64, dropout=0.1,
-            tgt_emb_prj_weight_sharing=True,
-            emb_src_tgt_weight_sharing=True):
+            self, position_encoding_layer, n_layers, n_head, d_features, max_seq_length, d_meta, dropout=0.1, use_bottleneck=True,
+            d_bottleneck=256):
 
         super().__init__()
 
-        self.encoder = Encoder(
-            embedding=embedding,
-            len_max_seq=len_max_seq,
-            d_word_vec=d_word_vec, d_model=d_model, d_inner=d_inner,
-            n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
-            dropout=dropout)
+        self.encoder = Encoder(position_encoding_layer, n_layers, n_head, d_features, max_seq_length, d_meta, dropout, use_bottleneck, d_bottleneck)
 
-        self.decoder = Decoder(
-            n_tgt_vocab=n_tgt_vocab, len_max_seq=len_max_seq,
-            d_word_vec=d_word_vec, d_model=d_model, d_inner=d_inner,
-            n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
-            dropout=dropout)
+        self.decoder = Decoder(position_encoding_layer, n_layers, n_head, d_features, max_seq_length, d_meta, dropout, use_bottleneck, d_bottleneck)
 
-        self.tgt_word_prj = nn.Linear(d_model, n_tgt_vocab, bias=False)
-        nn.init.xavier_normal_(self.tgt_word_prj.weight)
+        # Logit scaler
+        # self.x_logit_scale = (d_features ** -0.5)
+        # self.x_logit_scale = 1.
 
-        assert d_model == d_word_vec, \
-            'To facilitate the residual connections, \
-             the dimensions of all module outputs shall be the same.'
-
-        if tgt_emb_prj_weight_sharing:
-            # Share the weight matrix between target word embedding & the final logit dense layer
-            self.tgt_word_prj.weight = self.decoder.tgt_word_emb.weight
-            self.x_logit_scale = (d_model ** -0.5)
-        else:
-            self.x_logit_scale = 1.
-
-        if emb_src_tgt_weight_sharing:
-            # Share the weight matrix between source & target word embeddings
-            # assert n_src_vocab == n_tgt_vocab, \
-            "To share word embedding table, the vocabulary size of src/tgt shall be the same."
-            self.encoder.word_embedding.weight = self.decoder.tgt_word_emb.weight
-
-    def forward(self, src_seq, src_pos, tgt_seq, tgt_pos):
-
-        tgt_seq, tgt_pos = tgt_seq[:, :-1], tgt_pos[:, :-1]
-
-        enc_output, *_ = self.encoder(src_seq, src_pos)
-        dec_output, *_ = self.decoder(tgt_seq, tgt_pos, src_seq, enc_output)
-        seq_logit = self.tgt_word_prj(dec_output) * self.x_logit_scale
-
-        return seq_logit.view(-1, seq_logit.size(2))
-
-
-class TransformerCls(nn.Module):
-    '''Transformer module for classification'''
-
-    def __init__(
-            self,
-            embedding, output_num, len_max_seq,
-            d_word_vec=100, d_model=512, d_inner=2048,
-            n_layers=6, n_head=8, d_k=64, d_v=64, dropout=0.1):
-        super().__init__()
-
-        self.encoder = Encoder(
-            embedding=embedding,
-            len_max_seq=len_max_seq,
-            d_word_vec=d_word_vec, d_model=d_model, d_inner=d_inner,
-            n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
-            dropout=dropout)
-
-        # encoder output: [batch_size, seq_length, w2v_length]
-
-        self.tgt_word_prj = nn.Linear(len_max_seq * d_word_vec, output_num, bias=False)
-        nn.init.xavier_normal_(self.tgt_word_prj.weight)
-
-    def forward(self, src_seq, src_pos):
+    def forward(self, input_feature_sequence, in_position, target_feature_sequence, tg_position):
         '''
             Arguments:
-                src_seq {Tensor, shape [batch, len_max_seq]} -- word index sequence with padding
-                src_pos {Tensor, shape [batch, len_max_seq]} -- position index sequence with padding
+                input_feature_sequence {Tensor, shape [batch, max_sequence_length, d_features]} -- input feature sequence
+                in_position {Tensor, shape [batch, max_sequence_length, d_meta]} -- input feature position sequence
 
             Returns:
-                seq_logit {Tensor, shape [batch, output_num]} -- logits
+                dec_output {Tensor, shape [batch, ?]} -- decoder output (representation)
         '''
-        enc_output, *_ = self.encoder(src_seq, src_pos)
-        seq_logit = self.tgt_word_prj(enc_output.view([enc_output.size(0), -1]))
 
-        return seq_logit
+        # target_feature_sequence, tg_position = target_feature_sequence[:, :-1], tg_position[:, :-1]
+        enc_output, encoder_self_attn_list = self.encoder(input_feature_sequence, in_position, non_pad_mask=None, slf_attn_mask=None)
+        dec_output, dec_slf_attn_list, dec_enc_attn_list = self.decoder(target_feature_sequence, tg_position, enc_output, non_pad_mask=None, slf_attn_mask=None, dec_enc_attn_mask=None)
+
+        # dec_output = self.fc(dec_output) * self.x_logit_scale
+        return dec_output
+
