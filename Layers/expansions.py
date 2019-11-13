@@ -177,25 +177,51 @@ class ChannelWiseConv1d(nn.Module):
     def initialize_param(self, init, *args):
         init(self.conv.weight, *args)
 
+class ChannelWiseConvExpansion(nn.Module):
+    '''expansion 2D -> 3D -> flatten'''
 
-class ChannelWiseConv2d(nn.Module):
     def __init__(self, d_features, n_channel, n_depth):
         super().__init__()
         self.d_features = d_features
         self.n_channel = n_channel
         self.n_depth = n_depth
 
-        self.conv = nn.Conv2d(n_depth, n_depth * n_channel, kernel_size=3, padding=(0, 1), groups=n_depth, bias=False)
+        self.channel_conv = ChannelWiseConv1d(d_features, n_channel, n_depth)
 
     def forward(self, x):
         '''
             Arguments:
-                x {Tensor, shape [batch, 3, n_depth, d_features]} -- input
+                x {Tensor, shape [batch, n_depth, d_features]
+
+            Returns:
+                x {Tensor, shape [batch, n_depth, n_channel * d_features]} -- output
+        '''
+        x = self.channel_conv(x)  # [batch, n_depth, n_channel, d_features]
+        x = x.view([-1, self.n_depth, self.n_channel * self.d_features])  # [batch, n_depth, n_channel * d_features]
+        return x
+
+    def initialize_param(self, init, *args):
+        self.channel_conv.initialize_param(init, *args)
+
+
+class ChannelWiseConv2d(nn.Module):
+    def __init__(self, d_features, n_channel, n_depth, c_total=3):
+        super().__init__()
+        self.d_features = d_features
+        self.n_channel = n_channel
+        self.n_depth = n_depth
+
+        self.conv = nn.Conv2d(n_depth, n_depth * n_channel, kernel_size=(c_total, 3), padding=(0, 1), groups=n_depth, bias=False)
+
+    def forward(self, x):
+        '''
+            Arguments:
+                x {Tensor, shape [batch, c_total, n_depth, d_features]} -- input
 
             Returns:
                 x {Tensor, shape [batch, n_depth, n_channel, d_features]} -- output
         '''
-        x = x.permute([0, 2, 1, 3]).contiguous()
+        x = x.permute([0, 2, 1, 3]).contiguous()  # [batch, n_depth, c_total, d_features]
         x = self.conv(x)  # [batch, n_depth * n_channel, 1, d_features]
         x = x.view(
             [-1, self.n_depth, self.n_channel, self.d_features])  # [batch, n_depth, n_channel, d_features]
@@ -204,26 +230,21 @@ class ChannelWiseConv2d(nn.Module):
     def initialize_param(self, init, *args):
         init(self.conv.weight, *args)
 
+class ChannelWiseConvExpansionV2(nn.Module):
+    '''expansion 3D -> 3D -> flatten'''
 
-class ChannelWiseConvExpansion(nn.Module):
-    '''expansion 2D/3D -> 3D -> flatten'''
-
-    def __init__(self, d_features, n_channel, n_depth, input_dim=3):
+    def __init__(self, d_features, n_channel, n_depth, c_total=3):
         super().__init__()
         self.d_features = d_features
         self.n_channel = n_channel
         self.n_depth = n_depth
 
-        if input_dim == 3:
-            self.channel_conv = ChannelWiseConv1d(d_features, n_channel, n_depth)
-
-        elif input_dim == 4:
-            self.channel_conv = ChannelWiseConv2d(d_features, n_channel, n_depth)
+        self.channel_conv = ChannelWiseConv2d(d_features, n_channel, n_depth, c_total=c_total)
 
     def forward(self, x):
         '''
             Arguments:
-                x {Tensor, shape [batch, n_depth, d_features] or [batch, 3, n_depth, d_features]} -- input
+                x {Tensor, shape [batch, c_total, n_depth, d_features]
 
             Returns:
                 x {Tensor, shape [batch, n_depth, n_channel * d_features]} -- output
