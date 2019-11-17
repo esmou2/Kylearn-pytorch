@@ -56,13 +56,15 @@ class TransormerClassifierModel(Model):
         }
         encoding_dict = {
             'SinusoidPositionEncoding': SinusoidPositionEncoding,
-            'LinearPositionEncoding': LinearPositionEncoding
+            'LinearPositionEncoding': LinearPositionEncoding,
+            'TimeFacilityEncoding': TimeFacilityEncoding
         }
 
         self.model = stack_dict[stack](encoding_dict[position_encode], d_features=d_features, max_seq_length=max_length, d_meta=d_meta, **kwargs)
         
         # --------------------------- Embedding  --------------------------- #
         if len(embedding) == 0:
+            self.word_embedding = None
             self.USE_EMBEDDING = False
 
         else:
