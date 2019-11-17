@@ -318,3 +318,26 @@ class LinearPositionEncoding(nn.Module):
         x = self.tanh(x)
         return x
 
+
+class TimeFacilityEncoding(nn.Module):
+
+    def __init__(self, d_features, max_length=None, d_meta = None):
+        super().__init__()
+        self.time_enc = nn.Embedding.from_pretrained(
+            get_sinusoid_encoding_table(max_length, d_features, padding_idx=0),
+            freeze=True)
+        torch.manual_seed(1)
+        self.facility_enc = torch.nn.Embedding(d_meta, d_features)
+
+
+    def forward(self, x):
+        '''
+            Argument:
+                x {Tensor, shape: [batch, length, 2]} -- sequence position index masked
+            Returns:
+                x {Tensor, shape: [batch, length, d_features]} -- positional encoding
+        '''
+        time = x[:, :, 0]
+        facility = x[:, :, 1]
+        x = self.time_enc(time) + self.facility_enc(facility)
+        return x
