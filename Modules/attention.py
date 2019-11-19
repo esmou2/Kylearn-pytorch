@@ -130,3 +130,25 @@ class ShuffleSelfAttentionStack(nn.Module):
             self_attn_list += [self_attn]
 
         return feature_1, self_attn_list
+
+class ShuffleSelfAttentionStackV2(nn.Module):
+    ''' Self Attention Stack Module '''
+
+    def __init__(
+            self,expansion_layer, n_depth, d_features, n_layers, n_head, n_channel, n_vchannel, d_bottleneck=256, dropout=0.1, mode='1d', use_bottleneck=True):
+        super().__init__()
+        self.layer_stack = nn.ModuleList([
+            ShuffleSelfAttentionLayerV2(expansion_layer, n_depth, d_features, n_head, n_channel, n_vchannel, dropout=dropout,
+                                      mode=mode, use_bottleneck=use_bottleneck, d_bottleneck=d_bottleneck)
+            for _ in range(n_layers)])
+
+    def forward(self, feature_1, feature_2=None):
+
+        self_attn_list = []
+
+        for sa_layer in self.layer_stack:
+            feature_1, self_attn = sa_layer(
+                feature_1)
+            self_attn_list += [self_attn]
+
+        return feature_1, self_attn_list

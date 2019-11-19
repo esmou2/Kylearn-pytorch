@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def feature_shuffle(d_features, depth):
+def feature_shuffle_index(d_features, depth):
     '''
         Arguments:
             d_features {Int} -- the dimension of the features
