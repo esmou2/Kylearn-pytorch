@@ -20,6 +20,8 @@ class Encoder(nn.Module):
             Arguments:
                 input_feature_sequence {Tensor, shape [batch, max_sequence_length, d_features]} -- input feature sequence
                 position {Tensor, shape [batch, max_sequence_length (, d_meta)]} -- input feature position sequence
+                non_pad_mask {Tensor, shape [batch, length, 1]} -- index of which position in a sequence is a padding
+                slf_attn_mask {Tensor, shape [batch, length, length]} -- self attention mask
 
             Returns:
                 enc_output {Tensor, shape [batch, max_sequence_length, d_features]} -- encoder output (representation)
@@ -28,9 +30,11 @@ class Encoder(nn.Module):
         '''
 
         encoder_self_attn_list = []
+        enc_output = feature_sequence
 
         # Add position information at the beginning
-        enc_output = feature_sequence + self.position_enc(position)
+        pos_enc = self.position_enc(position)
+        enc_output = feature_sequence + pos_enc
 
         for enc_layer in self.layer_stack:
             enc_output, encoder_self_attn = enc_layer(
