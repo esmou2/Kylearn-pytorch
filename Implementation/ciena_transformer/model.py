@@ -12,16 +12,16 @@ from tqdm import tqdm
 def get_attn_mask(padding):
     '''
         Arguments:
-            padding {Tensor, [batch, t*max_length, 1]} -- padding index
+            padding {Tensor, float32 [batch, t*max_length, 1]} -- padding index, 1 means is padded
         Returns:
-            non_pad_mask {Tensor, [batch, t*max_length, 1]} --
-            slf_attn_mask {Tensor, [batch, t*max_length, t*max_length]} --
+            non_pad_mask {Tensor, [batch, t*max_length, 1]} -- 0 means is padded
+            slf_attn_mask {Tensor, [batch, t*max_length, t*max_length]} -- True means is padded
     '''
     padding = padding.squeeze(-1)
     slf_attn_mask = get_attn_key_pad_mask(seq_k=padding, seq_q=padding,
-                                          padding_idx=0)  # [batch, t*max_length, t*max_length]
-    non_pad_mask = padding.unsqueeze(-1)  # [batch, t*max_length, 1]
-
+                                          padding_idx=1)  # [batch, t*max_length, t*max_length]
+    non_pad_mask = torch.cuda.FloatTensor(1) - padding.unsqueeze(-1)  # [batch, t*max_length, 1]
+    non_pad_mask = non_pad_mask.float()
 
     return non_pad_mask, slf_attn_mask
 
@@ -36,7 +36,7 @@ class CienaTransformerModel(Model):
                 save_path -- model file path
                 log_path -- log file path
                 d_features -- how many PMs
-                d_meta -- how many facilities in total
+                d_meta -- how many facility types
                 max_length -- input sequence length
                 d_classifier -- classifier hidden unit
                 n_classes -- output dim
