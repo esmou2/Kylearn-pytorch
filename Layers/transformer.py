@@ -15,6 +15,25 @@ def get_non_pad_mask(seq, padding_idx=0):
     mask = seq.ne(padding_idx).type(torch.float)
     return mask.unsqueeze(-1)
 
+def get_attn_key_pad_mask(seq_k, seq_q, padding_idx=0):
+    '''
+        For masking out the padding part of key sequence.
+        Arguments:
+            seq_k {Tensor, shape [batch, len_k]} -- key sequence
+            seq_q {Tensor, shape [batch, len_q]} -- query sequence
+
+        Returns:
+            padding_mask {Tensor, shape [batch, len_q, len_k]} -- mask matrix, if the corresponding position is padding then True
+            key mask [batch, k] -> expand q times [batch, len_q, len_k]
+
+    '''
+
+    # Expand to fit the shape of key query attention matrix.
+    len_q = seq_q.size(1)
+    padding_mask = seq_k.eq(padding_idx)
+    padding_mask = padding_mask.unsqueeze(1).expand(-1, len_q, -1)  # b x lq x lk
+
+    return padding_mask
 
 def get_sinusoid_encoding_table(n_position, d_hid, padding_idx=None):
     '''
@@ -44,28 +63,6 @@ def get_sinusoid_encoding_table(n_position, d_hid, padding_idx=None):
         sinusoid_table[padding_idx] = 0.
 
     return torch.FloatTensor(sinusoid_table)
-
-
-def get_attn_key_pad_mask(seq_k, seq_q, padding_idx=0):
-    '''
-        For masking out the padding part of key sequence.
-        Arguments:
-            seq_k {Tensor, shape [batch, len_k]} -- key sequence
-            seq_q {Tensor, shape [batch, len_q]} -- query sequence
-
-        Returns:
-            padding_mask {Tensor, shape [batch, len_q, len_k]} -- mask matrix
-            key mask [batch, k] -> expand q times [batch, len_q, len_k]
-
-    '''
-
-    # Expand to fit the shape of key query attention matrix.
-    len_q = seq_q.size(1)
-    padding_mask = seq_k.eq(padding_idx)
-    padding_mask = padding_mask.unsqueeze(1).expand(-1, len_q, -1)  # b x lq x lk
-
-    return padding_mask
-
 
 def get_subsequent_mask(seq):
     ''' For masking out the subsequent info. '''
@@ -106,7 +103,7 @@ class EncoderLayer(nn.Module):
             enc_input, enc_input, enc_input, mask=slf_attn_mask)
         enc_output *= non_pad_mask
 
-        enc_output = self.bottleneck(enc_output) # wider the network
+        enc_output = self.bottleneck(enc_output)
         enc_output *= non_pad_mask
 
         return enc_output, encoder_self_attn
@@ -327,7 +324,7 @@ class TimeFacilityEncoding(nn.Module):
             get_sinusoid_encoding_table(max_length, d_features, padding_idx=0),
             freeze=True)
         torch.manual_seed(1)
-        self.facility_enc = torch.nn.Embedding(d_meta, d_features)
+        self.facility_enc = torch.nn.Embedding(d_meta+1, d_features, padding_idx=0)
 
 
     def forward(self, x):
@@ -337,7 +334,11 @@ class TimeFacilityEncoding(nn.Module):
             Returns:
                 x {Tensor, shape: [batch, length, d_features]} -- positional encoding
         '''
-        time = x[:, :, 0]
-        facility = x[:, :, 1]
-        x = self.time_enc(time) + self.facility_enc(facility)
+        facility_index = x[:, :, 1].long()
+        facility_mask = facility_index == 0
+        facility = self.facility_enc(facility_index)
+        time = x[:, :, 0].masked_fill(facility_mask, 0)
+        time = self.time_enc(time)
+
+        x = time + facility
         return x
