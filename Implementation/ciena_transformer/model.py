@@ -20,7 +20,7 @@ def get_attn_mask(padding):
     padding = padding.squeeze(-1)
     slf_attn_mask = get_attn_key_pad_mask(seq_k=padding, seq_q=padding,
                                           padding_idx=1)  # [batch, t*max_length, t*max_length]
-    non_pad_mask = torch.cuda.FloatTensor(1) - padding.unsqueeze(-1)  # [batch, t*max_length, 1]
+    non_pad_mask = ~padding.unsqueeze(-1).bool()  # [batch, t*max_length, 1]
     non_pad_mask = non_pad_mask.float()
 
     return non_pad_mask, slf_attn_mask
@@ -75,7 +75,7 @@ class CienaTransformerModel(Model):
         # ---------------------------- Optimizer --------------------------- #
         self.parameters = list(self.model.parameters()) + list(self.classifier.parameters())
         if optimizer == None:
-            self.optimizer = AdamW(self.parameters, lr=0.002, betas=(0.9, 0.999), weight_decay=0.001)
+            self.optimizer = AdamW(self.parameters, lr=0.001, betas=(0.9, 0.999), weight_decay=0.001)
 
         # ------------------------ training control ------------------------ #
         self.controller = TrainingControl(max_step=100000, evaluate_every_nstep=100, print_every_nstep=10)

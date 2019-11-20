@@ -69,8 +69,8 @@ class CienaPortDataloader():
 
         test_indices, eval_indices = test_indices[split:], test_indices[:split]
 
-        train_sampler = SubsetRandomSampler(train_indices)
-        # train_sampler = BalanceSampler(train_set.targets, train_indices)
+        # train_sampler = SubsetRandomSampler(train_indices)
+        train_sampler = BalanceSampler(train_set.targets, train_indices)
         valid_sampler = SubsetRandomSampler(eval_indices)
 
         self.train_loader = DataLoader(train_set, batch_size, sampler=train_sampler, num_workers=4)
@@ -87,5 +87,3 @@ class CienaPortDataloader():
     def test_dataloader(self):
         return self.test_loader
 
-
-data = CienaPortDataset('/home/oem/Projects/Kylearn-pytorch/Implementation/ciena_transformer/data/', 4)
