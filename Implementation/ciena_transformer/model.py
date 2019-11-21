@@ -12,7 +12,7 @@ from tqdm import tqdm
 def get_attn_mask(padding):
     '''
         Arguments:
-            padding {Tensor, float32 [batch, t*max_length, 1]} -- padding index, 1 means is padded
+            padding {Tensor, np.int64 [batch, t*max_length, 1]} -- padding index, 1 means is padded
         Returns:
             non_pad_mask {Tensor, [batch, t*max_length, 1]} -- 0 means is padded
             slf_attn_mask {Tensor, [batch, t*max_length, t*max_length]} -- True means is padded
@@ -82,6 +82,7 @@ class CienaTransformerModel(Model):
         self.early_stopping = EarlyStopping(patience=50)
 
         # --------------------- logging and tensorboard -------------------- #
+        self.count_parameters()
         self.set_logger()
         self.set_summary_writer()
         # ---------------------------- END INIT ---------------------------- #

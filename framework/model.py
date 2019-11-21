@@ -70,3 +70,20 @@ class Model():
         classifier_state_dict = checkpoint['classifier_state_dict']
         self.classifier.load_state_dict(classifier_state_dict)
         self.classifier.eval()
+
+    def count_parameters(self):
+        try:
+            assert self.model != None
+            model_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+            print('Number of Model Parameters: %d'%model_params)
+        except:
+            print('No Model specified')
+
+        try:
+            assert self.classifier != None
+            classifier = sum(p.numel() for p in self.classifier.parameters() if p.requires_grad)
+            print('Number of Model Classifier: %d' % classifier)
+        except:
+            print('No Classifier specified')
+
+
