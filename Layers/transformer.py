@@ -76,14 +76,14 @@ def get_subsequent_mask(seq):
 
 class EncoderLayer(nn.Module):
     # def __init__(self, d_model, d_inner, n_head, d_k, d_v, dropout=0.1):
-    def __init__(self, d_features, n_head, dropout,
+    def __init__(self, d_features, n_head, d_k, d_v, dropout,
                  use_bottleneck=False, d_bottleneck=128):
         super().__init__()
 
         # To reduce computation
-        d_reduce_param = np.floor(d_features / n_head).astype(int)
+        # d_reduce_param = np.floor(d_features / n_head).astype(int)
 
-        self.self_attn = MultiHeadAttention(n_head, d_features, d_reduce_param, d_reduce_param, dropout)
+        self.self_attn = MultiHeadAttention(n_head, d_features, d_k, d_v, dropout)
         if use_bottleneck:
             self.bottleneck = PositionwiseFeedForward(d_features, d_bottleneck, dropout=dropout)
 
