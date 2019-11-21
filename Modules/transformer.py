@@ -1,18 +1,27 @@
 import torch.nn as nn
 from Layers.transformer import EncoderLayer, DecoderLayer
+import numpy as np
 
 class Encoder(nn.Module):
     ''' A encoder models with self attention mechanism. '''
 
     def __init__(
-            self, position_encoding_layer, n_layers, n_head, d_features, max_seq_length, d_meta, dropout=0.1, use_bottleneck=True, d_bottleneck=256):
+            self, position_encoding_layer, n_layers, n_head, d_features, max_seq_length, d_meta, d_k=None, d_v=None, dropout=0.1, use_bottleneck=True, d_bottleneck=256):
         super().__init__()
 
+        if d_k == None or d_v == None:
+            if d_k == d_v:
+                d_reduce_param = np.floor(d_features / n_head).astype(int)
+                d_k, d_v = d_reduce_param, d_reduce_param
+            elif d_k == None:
+                d_k = d_v
+            else:
+                d_v = d_k
 
         self.position_enc = position_encoding_layer(d_features=d_features, max_length=max_seq_length, d_meta=d_meta)
 
         self.layer_stack = nn.ModuleList([
-            EncoderLayer(d_features, n_head, dropout, use_bottleneck=use_bottleneck, d_bottleneck=d_bottleneck)
+            EncoderLayer(d_features, n_head, d_k, d_v, dropout, use_bottleneck=use_bottleneck, d_bottleneck=d_bottleneck)
             for _ in range(n_layers)])
 
     def forward(self, feature_sequence, position, non_pad_mask=None, slf_attn_mask=None):
