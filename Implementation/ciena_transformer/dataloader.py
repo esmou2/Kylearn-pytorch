@@ -16,7 +16,7 @@ class CienaPortDataset(Dataset):
         # Load training data
         self.targets = np.load(file_path + '4transformer_label.npy', allow_pickle=True) # [batch, 1]
         self.feature_sequence = np.load(file_path + '4transformer_PMs.npy', allow_pickle=True).astype(np.float32)
-        self.padding = np.load(file_path + '4transformer_padding.npy', allow_pickle=True).astype(np.float32)  # [batch, t*max_length, 1]
+        self.padding = np.load(file_path + '4transformer_padding.npy', allow_pickle=True).astype(np.long)  # [batch, t*max_length, 1]
         self.time_facility = np.load(file_path + '4transformer_Time_Facility.npy', allow_pickle=True)  # [batch, t*max_length, 2]
 
         # Fill features nan with 0
