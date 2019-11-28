@@ -9,10 +9,11 @@ class Model():
         self.log_path = log_path
         self.model = None
         self.classifier = None
+        self.parameters = None
+        self.optimizer = None
         self.train_logger = None
         self.eval_logger = None
         self.summary_writer = None
-
 
     @abstractmethod
     def loss(self, **kwargs):
@@ -30,6 +31,8 @@ class Model():
     def checkpoint(self, **kwargs):
         pass
 
+    def set_optimizer(self, Optimizer, lr, **kwargs):
+        self.optimizer = Optimizer(self.parameters, lr=lr, **kwargs)
 
     def set_logger(self, mode='a'):
         self.train_logger = logger('train',self.log_path + '-train', mode=mode)
