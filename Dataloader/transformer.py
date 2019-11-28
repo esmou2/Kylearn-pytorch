@@ -29,7 +29,7 @@ def process_indexes(index_series, max_length=None):
     # position {Pandas Series} -- each element is a list of positions
     # max_length {Int} -- the max length of all lists in the Series
 
-    if max_length == None:
+    if max_length is None:
         max_length = max_length_
     else:
         if max_length < max_length_:
