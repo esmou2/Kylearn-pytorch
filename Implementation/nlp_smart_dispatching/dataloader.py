@@ -6,17 +6,23 @@ from Dataloader.samplers import BalanceSampler
 
 
 class TextualDataset(Dataset):
-    def __init__(self, file_path, max_length=None):
+    def __init__(self, file_path, cut_length=None):
         super().__init__()
         # Load training data
         dataframe = pd.read_csv(file_path)
 
-        self.input_sequence_index, self.position_index, max_length = process_indexes(dataframe['indexes'], max_length)
+        self.input_sequence_index, self.position_index, max_length = process_indexes(dataframe['input_indexes'])
 
-        self.targets = dataframe['is_vulnerable'].values.reshape(-1, 1)
+        self.targets = dataframe['class'].values.reshape(-1, 1)
 
+        self.n_targets = dataframe['class'].unique().size
 
         self.max_length = max_length
+
+        if not (cut_length is None):
+            self.input_sequence_index = self.input_sequence_index[:, :cut_length]
+            self.position_index = self.position_index[:, :cut_length]
+            self.max_length = cut_length
 
     def __len__(self):
         return len(self.targets)
@@ -24,16 +30,20 @@ class TextualDataset(Dataset):
     def __getitem__(self, index):
         if torch.is_tensor(index):
             index = index.tolist()
-        sample = (torch.from_numpy(self.input_sequence_index[index, :]),
-                  torch.from_numpy(self.position_index[index, :]),
+        sample = (torch.from_numpy(self.input_sequence_index[index, :].astype(np.long)),
+                  torch.from_numpy(self.position_index[index, :].astype(np.long)),
                   torch.from_numpy(self.targets[index, :]))
 
         return sample
 
 class TextualDataloader():
-    def __init__(self, train_path, test_path, batch_size, eval_portion, max_length=207, shuffle=True):
-        train_set = TextualDataset(train_path, max_length=max_length)
-        test_set = TextualDataset(test_path, max_length=max_length)
+    def __init__(self, train_path, test_path, batch_size, eval_portion, cut_length=None, shuffle=True):
+        train_set = TextualDataset(train_path, cut_length=cut_length)
+        test_set = TextualDataset(test_path, cut_length=cut_length)
+
+        self.max_length = train_set.max_length
+
+        self.n_targets = train_set.n_targets
 
         train_size = len(train_set)
         train_indices = list(range(train_size))
