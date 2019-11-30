@@ -2,6 +2,7 @@ from framework.model import Model
 from Modules.linear import LinearClassifier
 from Modules.transformer import *
 from Layers.transformer import *
+from Layers.encodings import *
 from torch.optim.adamw import AdamW
 from Training.losses import *
 from Training.evaluation import accuracy, precision_recall, Evaluator
