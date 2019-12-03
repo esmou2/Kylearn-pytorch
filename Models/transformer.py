@@ -3,7 +3,7 @@ from Modules.linear import LinearClassifier
 from Modules.transformer import *
 from Layers.transformer import *
 from Layers.encodings import *
-from torch.optim.adamw import AdamW
+from torch.optim.adam import Adam
 from Training.losses import *
 from Training.evaluation import accuracy, precision_recall, Evaluator
 from Training.control import TrainingControl, EarlyStopping
@@ -94,7 +94,7 @@ class TransormerClassifierModel(Model):
         # ---------------------------- Optimizer --------------------------- #
         self.parameters = list(self.model.parameters()) + list(self.classifier.parameters())
         if optimizer == None:
-            self.set_optimizer(AdamW, lr=0.001, betas=(0.9, 0.999), weight_decay=0.001)
+            self.set_optimizer(Adam, lr=0.001, betas=(0.9, 0.999), weight_decay=0)
 
         # ------------------------ training control ------------------------ #
         self.controller = TrainingControl(max_step=100000, evaluate_every_nstep=100, print_every_nstep=10)
