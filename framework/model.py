@@ -9,10 +9,11 @@ class Model():
         self.log_path = log_path
         self.model = None
         self.classifier = None
+        self.parameters = None
+        self.optimizer = None
         self.train_logger = None
         self.eval_logger = None
         self.summary_writer = None
-
 
     @abstractmethod
     def loss(self, **kwargs):
@@ -30,6 +31,8 @@ class Model():
     def checkpoint(self, **kwargs):
         pass
 
+    def set_optimizer(self, Optimizer, lr, **kwargs):
+        self.optimizer = Optimizer(self.parameters, lr=lr, **kwargs)
 
     def set_logger(self, mode='a'):
         self.train_logger = logger('train',self.log_path + '-train', mode=mode)
@@ -70,3 +73,20 @@ class Model():
         classifier_state_dict = checkpoint['classifier_state_dict']
         self.classifier.load_state_dict(classifier_state_dict)
         self.classifier.eval()
+
+    def count_parameters(self):
+        try:
+            assert self.model != None
+            model_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+            print('Number of Model Parameters: %d'%model_params)
+        except:
+            print('No Model specified')
+
+        try:
+            assert self.classifier != None
+            classifier = sum(p.numel() for p in self.classifier.parameters() if p.requires_grad)
+            print('Number of Model Classifier: %d' % classifier)
+        except:
+            print('No Classifier specified')
+
+

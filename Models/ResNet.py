@@ -1,48 +1,20 @@
 from framework.model import Model
 from Modules.linear import LinearClassifier
-from Modules.transformer import *
-from Layers.transformer import *
-from Layers.encodings import *
-from torch.optim.adam import Adam
+from Modules.ResNet import ResNet
+from Layers.encodings import SinusoidPositionEncoding
+from torch.optim.adamw import AdamW
 from Training.losses import *
 from Training.evaluation import accuracy, precision_recall, Evaluator
 from Training.control import TrainingControl, EarlyStopping
 from tqdm import tqdm
 
 
-def get_attn_mask(padding):
-    '''
-        Arguments:
-            padding {Tensor, np.int64 [batch, t*max_length, 1]} -- padding index, 1 means is padded
-        Returns:
-            non_pad_mask {Tensor, [batch, t*max_length, 1]} -- 0 means is padded
-            slf_attn_mask {Tensor, [batch, t*max_length, t*max_length]} -- True means is padded
-    '''
-    padding = padding.squeeze(-1)
-    slf_attn_mask = get_attn_key_pad_mask(seq_k=padding, seq_q=padding,
-                                          padding_idx=1)  # [batch, t*max_length, t*max_length]
-    non_pad_mask = ~padding.unsqueeze(-1).bool()  # [batch, t*max_length, 1]
-    non_pad_mask = non_pad_mask.float()
-
-    return non_pad_mask, slf_attn_mask
-
-
-class CienaTransformerModel(Model):
+class ResNetClassifierModel(Model):
     def __init__(
             self, save_path, log_path, d_features, d_meta, max_length, d_classifier, n_classes, threshold=None,
-            optimizer=None, **kwargs):
+            embedding=None,
+            stack='Encoder', position_encode='SinusoidPositionEncoding', optimizer=None, **kwargs):
         '''**kwargs: n_layers, n_head, dropout, use_bottleneck, d_bottleneck'''
-        '''
-            Arguments:
-                save_path -- model file path
-                log_path -- log file path
-                d_features -- how many PMs
-                d_meta -- how many facility types
-                max_length -- input sequence length
-                d_classifier -- classifier hidden unit
-                n_classes -- output dim
-                threshold -- if not None, n_classes should be 1 (regression).
-        '''
 
         super().__init__(save_path, log_path)
         self.d_output = n_classes
@@ -51,8 +23,21 @@ class CienaTransformerModel(Model):
 
         # ----------------------------- Model ------------------------------ #
 
-        self.model = Encoder(TimeFacilityEncoding, d_features=d_features, max_seq_length=max_length,
+        encoding_dict = {
+            'SinusoidPositionEncoding': SinusoidPositionEncoding,
+        }
+
+        self.model = ResNet[stack](encoding_dict[position_encode], d_features=d_features, max_seq_length=max_length,
                                        d_meta=d_meta, **kwargs)
+
+        # --------------------------- Embedding  --------------------------- #
+        if len(embedding) == 0:
+            self.word_embedding = None
+            self.USE_EMBEDDING = False
+
+        else:
+            self.word_embedding = nn.Embedding.from_pretrained(embedding)
+            self.USE_EMBEDDING = True
 
         # --------------------------- Classifier --------------------------- #
         self.classifier = LinearClassifier(d_features * max_length, d_classifier, n_classes)
@@ -76,14 +61,13 @@ class CienaTransformerModel(Model):
         # ---------------------------- Optimizer --------------------------- #
         self.parameters = list(self.model.parameters()) + list(self.classifier.parameters())
         if optimizer == None:
-            self.optimizer = Adam(self.parameters, lr=0.001, betas=(0.9, 0.999), weight_decay=0)
+            self.set_optimizer(AdamW, lr=0.001, betas=(0.9, 0.999), weight_decay=0.001)
 
         # ------------------------ training control ------------------------ #
         self.controller = TrainingControl(max_step=100000, evaluate_every_nstep=100, print_every_nstep=10)
         self.early_stopping = EarlyStopping(patience=50)
 
         # --------------------- logging and tensorboard -------------------- #
-        self.count_parameters()
         self.set_logger()
         self.set_summary_writer()
         # ---------------------------- END INIT ---------------------------- #
@@ -115,15 +99,15 @@ class CienaTransformerModel(Model):
 
             # get data from dataloader
 
-            input_feature_sequence, padding, time_facility, y = map(lambda x: x.to(device), batch)
+            index, position, y = map(lambda x: x.to(device), batch)
 
-            batch_size = len(y)
+            batch_size = len(index)
 
-            non_pad_mask, slf_attn_mask = get_attn_mask(padding)
+            input_feature_sequence, non_pad_mask, slf_attn_mask = parse_data_enc(index, self.word_embedding)
 
             # forward
             self.optimizer.zero_grad()
-            logits, attn = self.model(input_feature_sequence, time_facility, non_pad_mask, slf_attn_mask)
+            logits, attn = self.model(input_feature_sequence, position, non_pad_mask, slf_attn_mask)
             logits = logits.view(batch_size, -1)
             logits = self.classifier(logits)
 
@@ -195,14 +179,14 @@ class CienaTransformerModel(Model):
                     dataloader, mininterval=5,
                     desc='  - (Evaluation)   ', leave=False):  # training_data should be a iterable
 
-                input_feature_sequence, padding, time_facility, y = map(lambda x: x.to(device), batch)
+                index, position, y = map(lambda x: x.to(device), batch)
 
-                batch_size = len(y)
+                batch_size = len(index)
 
-                non_pad_mask, slf_attn_mask = get_attn_mask(padding)
+                input_feature_sequence, non_pad_mask, slf_attn_mask = parse_data_enc(index, self.word_embedding)
 
                 # get logits
-                logits, attn = self.model(input_feature_sequence, time_facility, non_pad_mask, slf_attn_mask)
+                logits, attn = self.model(input_feature_sequence, position, non_pad_mask, slf_attn_mask)
                 logits = logits.view(batch_size, -1)
                 logits = self.classifier(logits)
 
@@ -248,9 +232,15 @@ class CienaTransformerModel(Model):
 
             return state_dict['break']
 
-    def train(self, max_epoch, train_dataloader, eval_dataloader, device,
+    def train(self, max_epoch, lr, train_dataloader, eval_dataloader, device,
               smoothing=False, earlystop=False, save_mode='best'):
         assert save_mode in ['all', 'best']
+
+        if not (lr is None):
+            self.set_optimizer(AdamW, lr, betas=(0.9, 0.999), weight_decay=0.001)
+
+        if self.USE_EMBEDDING:
+            self.word_embedding = self.word_embedding.to(device)
 
         # train for n epoch
         for epoch_i in range(max_epoch):
@@ -273,6 +263,9 @@ class CienaTransformerModel(Model):
 
     def get_predictions(self, data_loader, device, max_batches=None, activation=None):
 
+        if self.USE_EMBEDDING:
+            self.word_embedding = self.word_embedding.to(device)
+
         pred_list = []
         real_list = []
 
@@ -286,12 +279,12 @@ class CienaTransformerModel(Model):
                     data_loader,
                     desc='  - (Testing)   ', leave=False):
 
-                input_feature_sequence, padding, time_facility, y = map(lambda x: x.to(device), batch)
+                index, position, y = map(lambda x: x.to(device), batch)
 
-                non_pad_mask, slf_attn_mask = get_attn_mask(padding)
+                input_feature_sequence, non_pad_mask, slf_attn_mask = parse_data_enc(index, self.word_embedding)
 
                 # get logits
-                logits, attn = self.model(input_feature_sequence, time_facility, non_pad_mask, slf_attn_mask)
+                logits, attn = self.model(input_feature_sequence, position, non_pad_mask, slf_attn_mask)
                 logits = logits.view(logits.shape[0], -1)
                 logits = self.classifier(logits)
 
@@ -309,5 +302,3 @@ class CienaTransformerModel(Model):
                         break
 
         return pred_list, real_list
-
-
