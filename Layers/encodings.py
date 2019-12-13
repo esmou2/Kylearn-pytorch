@@ -72,6 +72,7 @@ class TimeFacilityEncoding(nn.Module):
             freeze=True)
         torch.manual_seed(1)
         self.facility_enc = torch.nn.Embedding(d_meta+1, d_features, padding_idx=0)
+        self.facility_enc.weight.requires_grad = False
 
 
     def forward(self, x):
