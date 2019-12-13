@@ -24,7 +24,7 @@ def plot_pr_curve(recalls, precisions, auc, x_axis = 1):
     plt.ylabel('precision')
     plt.title('Precision-Recall curve')
     plt.legend(loc="lower right")
-    plt.show()
+    return plt
 
 def auc_roc(y_pred, y_test):
     auc = roc_auc_score(y_true=y_test, y_score=y_pred)
@@ -41,4 +41,4 @@ def plot_roc_curve(fprs, tprs, auc, x_axis = 1):
     plt.ylabel('True Positive Rate')
     plt.title('Receiver operating characteristic')
     plt.legend(loc="lower right")
-    plt.show()
+    return plt
