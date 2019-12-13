@@ -79,6 +79,9 @@ class Model():
             assert self.model != None
             model_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
             print('Number of Model Parameters: %d'%model_params)
+            for name, param in self.model.named_parameters():
+                if param.requires_grad:
+                    print(name, param.numel())
         except:
             print('No Model specified')
 
@@ -86,6 +89,9 @@ class Model():
             assert self.classifier != None
             classifier = sum(p.numel() for p in self.classifier.parameters() if p.requires_grad)
             print('Number of Model Classifier: %d' % classifier)
+            for name, param in self.classifier.named_parameters():
+                if param.requires_grad:
+                    print(name, param.numel())
         except:
             print('No Classifier specified')
 
