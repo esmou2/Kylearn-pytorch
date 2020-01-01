@@ -76,20 +76,7 @@ class TransormerClassifierModel(Model):
         self.classifier = LinearClassifier(d_features * max_length, d_classifier, n_classes)
         
         # ------------------------------ CUDA ------------------------------ #
-        # If GPU available, move the graph to GPU(s)
-        self.CUDA_AVAILABLE = self.check_cuda()
-        if self.CUDA_AVAILABLE:
-            device_ids = list(range(torch.cuda.device_count()))
-            self.model = nn.DataParallel(self.model, device_ids)
-            self.classifier = nn.DataParallel(self.classifier, device_ids)
-            self.model.to('cuda')
-            self.classifier.to('cuda')
-            assert (next(self.model.parameters()).is_cuda)
-            assert (next(self.classifier.parameters()).is_cuda)
-            pass
-
-        else:
-            print('CUDA not found or not enabled, use CPU instead')
+        self.data_parallel()
 
         # ---------------------------- Optimizer --------------------------- #
         self.parameters = list(self.model.parameters()) + list(self.classifier.parameters())
