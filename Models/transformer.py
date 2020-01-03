@@ -94,7 +94,7 @@ class TransormerClassifierModel(Model):
         # ---------------------------- Optimizer --------------------------- #
         self.parameters = list(self.model.parameters()) + list(self.classifier.parameters())
         if optimizer == None:
-            self.set_optimizer(Adam, lr=0.001, betas=(0.9, 0.999), weight_decay=0)
+            self.set_optimizer(Adam, lr=0.0001, betas=(0.9, 0.999), weight_decay=0)
 
         # ------------------------ training control ------------------------ #
         self.controller = TrainingControl(max_step=100000, evaluate_every_nstep=100, print_every_nstep=10)
@@ -272,7 +272,7 @@ class TransormerClassifierModel(Model):
         assert save_mode in ['all', 'best']
 
         if not (lr is None):
-            self.set_optimizer(AdamW, lr, betas=(0.9, 0.999), weight_decay=0.001)
+            self.set_optimizer(Adam, lr, betas=(0.9, 0.999), weight_decay=0)
 
         if self.USE_EMBEDDING:
             self.word_embedding = self.word_embedding.to(device)
