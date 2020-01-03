@@ -7,6 +7,7 @@ from torch.optim.adamw import AdamW
 from Training.losses import *
 from Training.evaluation import accuracy, precision_recall, Evaluator
 from Training.control import TrainingControl, EarlyStopping
+from Layers.expansions import feature_shuffle_index
 from tqdm import tqdm
 from utils.plot_curves import precision_recall as pr
 from utils.plot_curves import plot_pr_curve
@@ -35,26 +36,45 @@ class ScaledDotProduction(nn.Module):
     def forward(self, query, key, value):
         '''
             Arguments:
-                query {Tensor, shape [n_head * batch, n_depth, n_channel * d_features]} -- query
-                key {Tensor, shape [n_head * batch, n_depth, n_channel * d_features]} -- key
-                value {Tensor, shape [n_head * batch, n_depth, n_vchannel * d_features]} -- value
+                query {Tensor, shape: [batch, d_k, d_out]} -- query
+                key {Tensor, shape: [batch, d_k, n_candidate]} -- key
+                value {Tensor, shape: [batch, d_v, n_candidate]} -- value
 
             Returns:
                 output {Tensor, shape [n_head * batch, n_depth, n_vchannel * d_features] -- output
                 attn {Tensor, shape [n_head * batch, n_depth, n_depth] -- reaction attention
         '''
-        attn = torch.bmm(query, key.transpose(2, 1))  # [n_head * batch, n_depth, n_depth]
+        attn = torch.bmm(query.transpose(2, 1), key)  # [batch, d_out, n_candidate]
         # How should we set the temperature
         attn = attn / self.temperature
 
         attn = self.softmax(attn)  # softmax over d_f1
         attn = self.dropout(attn)
-        output = torch.bmm(attn, value)
+        output = torch.bmm(attn, value.transpose(2, 1))  # [batch, d_out, d_v]
 
         return output, attn
 
 
-class GroupSelfAttentionLayer(nn.Module):
+class Bottleneck(nn.Module):
+    def __init__(self, d_in, d_hid, dropout=0.1):
+        super().__init__()
+        self.w_1 = nn.Linear(d_in, d_hid)
+        self.w_2 = nn.Linear(d_hid, d_in)
+        self.layer_norm = nn.LayerNorm(d_in, eps=1e-6)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, features):
+        residual = features
+        features = self.layer_norm(features)
+
+        features = self.w_2(F.relu(self.w_1(features)))
+        features = self.dropout(features)
+        features += residual
+
+        return features
+
+
+class SelfAttentionLayer(nn.Module):
     def __init__(self, d_features, d_out, kernel, stride, d_k, d_v, n_replica, shuffled_index, dropout=0.1):
         super().__init__()
         self.d_features = d_features
@@ -66,18 +86,22 @@ class GroupSelfAttentionLayer(nn.Module):
         self.query = nn.Conv1d(1, d_k, self.stride, self.stride, bias=False)
         self.key = nn.Conv1d(1, d_k, kernel, stride, bias=False)
         self.value = nn.Conv1d(1, d_v, kernel, stride, bias=False)
+        self.conv = nn.Conv1d(d_v, 1, 1, 1, bias=False)
 
         self.query.initialize_param(nn.init.xavier_normal_)
         self.key.initialize_param(nn.init.xavier_normal_)
         self.value.initialize_param(nn.init.xavier_normal_)
+        nn.init.xavier_normal(self.conv.weight)
+
 
         self.attention = ScaledDotProduction(temperature=1)
 
         self.layer_norm = nn.LayerNorm(d_features)
         self.dropout = nn.Dropout(dropout)
-        # [TO BE DETERMINED]: Use Multi-Head?
-        self.bottleneck = nn.Conv1d(d_v, 1, 1, 1, bias=False)
-        nn.init.xavier_normal(self.bottleneck.weight)
+
+        ### Use Bottleneck? ###
+        self.bottleneck = Bottleneck(d_out, d_out)
+
 
     def forward(self, features):
         '''
@@ -88,41 +112,60 @@ class GroupSelfAttentionLayer(nn.Module):
                 output {Tensor, shape [batch, d_features]} -- output
                 attn {Tensor, shape [n_head * batch, d_features, d_features]} -- self attention
         '''
-        d_features, d_out, stride, n_replica, shuffled_index \
-            = self.d_features, self.d_out, self.stride, self.n_replica, self.shuffled_index
+        d_features, d_out, n_replica, shuffled_index \
+            = self.d_features, self.d_out, self.n_replica, self.shuffled_index
 
-        d_features_ceil = d_out * stride
+        residual = features
 
-        features = F.pad(features, (0, d_features_ceil - d_features), value=0)  # shape: [batch, d_features_ceil]
+        query = self.layer_norm(features)
+
+        # d_features_ceil = d_out * stride
+        #
+        # features = F.pad(features, (0, d_features_ceil - d_features), value=0)  # shape: [batch, d_features_ceil]
 
         shuffled_features = features[:, self.index]  # shape: [batch, n_replica * d_features]
 
-        query = self.query(features)  # shape: [batch, d_k, d_out]
+        query = self.query(query)  # shape: [batch, d_k, d_out]
         key = self.key(
             shuffled_features)  # shape: [batch, d_k, n_candidate], n_candidate = (n_replica * d_features) / stride
         value = self.value(shuffled_features)  # shape: [batch, d_v, n_candidate]
 
-        output, attn = self.attention(query, key, value)
+        output, attn = self.attention(query, key, value)  # shape: [batch, d_out, d_v], [batch, d_out, n_candidate]
+        output = output.transpose(2, 1).contiguous()  # shape: [batch, d_v, d_out]
+        output = self.conv(output).view(-1, d_out)  # shape: [batch, d_out]
+        output = self.dropout(output)
 
-        # output = output.view(n_head, batch_size, d_features, 1)
-        # output = output.permute(1, 2, 0, 3).contiguous().view(batch_size, -1)
-        #
-        # output = self.dropout(self.fc(output))
-        # output = self.layer_norm(output + residual)
+        if d_features == d_out:
+            output += residual
 
-        if self.use_bottleneck:
-            output = self.bottleneck(output)
+        ### Use Bottleneck? ###
+        output = self.bottleneck(output)
 
         return output, attn
 
 
-class GroupSelfAttention(nn.Module):
-    pass
+class SelfAttentionFeatureSelection(nn.Module):
+    def __init__(self, d_features, d_out_list):
+        super().__init__()
+        self.index = feature_shuffle_index(d_features, 8)
+        self.layers = nn.ModuleList([
+            SelfAttentionLayer(d_features, d_out, kernel=3, stride=3, d_k=32, d_v=32, n_replica=8,
+                               shuffled_index=self.index) for d_out in d_out_list])
+
+    def forward(self, features, feature_2=None):
+        self_attn_list = []
+
+        for layer in self.layers:
+            features, self_attn = layer(
+                features)
+            self_attn_list += [self_attn]
+
+        return features, self_attn_list
 
 
-class FSSAModel(Model):
+class SAFSModel(Model):
     def __init__(
-            self, save_path, log_path, n_depth, d_features, d_classifier, d_output, threshold=None, optimizer=None,
+            self, save_path, log_path, d_features, d_out_list, d_classifier, d_output, threshold=None, optimizer=None,
             **kwargs):
         '''*args: n_layers, n_head, n_channel, n_vchannel, dropout'''
         super().__init__(save_path, log_path)
@@ -131,7 +174,7 @@ class FSSAModel(Model):
 
         # ----------------------------- Model ------------------------------ #
 
-        self.model = ShuffleSelfAttention(ChannelWiseConvExpansion, n_depth=n_depth, d_features=d_features, **kwargs)
+        self.model = SelfAttentionFeatureSelection(d_features, d_out_list)
 
         # --------------------------- Classifier --------------------------- #
 
