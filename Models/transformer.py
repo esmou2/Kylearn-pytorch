@@ -4,6 +4,7 @@ from Modules.transformer import *
 from Layers.transformer import *
 from Layers.encodings import *
 from torch.optim.adam import Adam
+from torch.optim.adamw import AdamW
 from Training.losses import *
 from Training.evaluation import accuracy, precision_recall, Evaluator
 from Training.control import TrainingControl, EarlyStopping
@@ -52,6 +53,7 @@ class TransormerClassifierModel(Model):
         
         # ----------------------------- Model ------------------------------ #
         stack_dict = {
+            'Plain': Plain,
             'Encoder': Encoder,
             'Transformer': Transformer
         }
@@ -81,7 +83,7 @@ class TransormerClassifierModel(Model):
         # ---------------------------- Optimizer --------------------------- #
         self.parameters = list(self.model.parameters()) + list(self.classifier.parameters())
         if optimizer == None:
-            self.set_optimizer(Adam, lr=0.0001, betas=(0.9, 0.999), weight_decay=0)
+            self.set_optimizer(Adam, lr=0.001, betas=(0.9, 0.999), weight_decay=0)
 
         # ------------------------ training control ------------------------ #
         self.controller = TrainingControl(max_step=100000, evaluate_every_nstep=100, print_every_nstep=10)
@@ -106,8 +108,6 @@ class TransormerClassifierModel(Model):
         if device == 'cuda':
             assert self.CUDA_AVAILABLE
         # Set model and classifier training mode
-        self.model.train()
-        self.classifier.train()
 
         total_loss = 0
         batch_counter = 0
@@ -116,6 +116,9 @@ class TransormerClassifierModel(Model):
         for batch in tqdm(
                 train_dataloader, mininterval=1,
                 desc='  - (Training)   ', leave=False):  # training_data should be a iterable
+
+            self.model.train()
+            self.classifier.train()
 
             # get data from dataloader
 
