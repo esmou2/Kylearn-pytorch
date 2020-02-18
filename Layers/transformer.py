@@ -166,20 +166,20 @@ class MultiHeadAttention(nn.Module):
         self.d_k = d_k
         self.d_v = d_v
 
-        self.w_qs = nn.Linear(d_features, n_head * d_k)
-        self.w_ks = nn.Linear(d_features, n_head * d_k)
-        self.w_vs = nn.Linear(d_features, n_head * d_v)
+        self.w_qs = nn.Linear(d_features, n_head * d_k, bias=False)
+        self.w_ks = nn.Linear(d_features, n_head * d_k, bias=False)
+        self.w_vs = nn.Linear(d_features, n_head * d_v, bias=False)
         nn.init.normal_(self.w_qs.weight, mean=0, std=np.sqrt(2.0 / (d_features + d_k)))
         nn.init.normal_(self.w_ks.weight, mean=0, std=np.sqrt(2.0 / (d_features + d_k)))
         nn.init.normal_(self.w_vs.weight, mean=0, std=np.sqrt(2.0 / (d_features + d_v)))
 
         self.attention = ScaledDotProductAttention(temperature=np.power(d_k, 0.5))
+        self.dropout = nn.Dropout(dropout)
         self.layer_norm = nn.LayerNorm(d_features)
 
-        self.fc = nn.Linear(n_head * d_v, d_features)
+        self.fc = nn.Linear(n_head * d_v, d_features, bias=False)
         nn.init.xavier_normal_(self.fc.weight)
 
-        self.dropout = nn.Dropout(dropout)
 
     def forward(self, query, key, value, mask=None):
         '''
@@ -202,6 +202,8 @@ class MultiHeadAttention(nn.Module):
         assert len_k == len_v
 
         residual = query
+
+        query = self.layer_norm(query)
 
         query = self.w_qs(query).view(sz_b, len_q, n_head, d_k)  # target
         # [batch_size, seq_length, w2v_length] -> [batch_size, seq_length, n_head * dk] -> [batch_size, seq_length, n_head, dk]
@@ -226,14 +228,42 @@ class MultiHeadAttention(nn.Module):
         return output, attn
 
 
+# class PositionwiseFeedForward(nn.Module):
+#     ''' A two-1x1 Conv-layer bottleneck module '''
+#
+#     def __init__(self, d_in, d_hid, dropout=0.1):
+#         super().__init__()
+#         self.w_1 = nn.Conv1d(d_in, d_hid, 1, bias=False)  # position-wise
+#         self.w_2 = nn.Conv1d(d_hid, d_in, 1, bias=False)  # position-wise
+#         self.layer_norm = nn.LayerNorm(d_in)
+#         self.dropout = nn.Dropout(dropout)
+#
+#     def forward(self, x):
+#         '''
+#             Arguments:
+#                 x {Tensor, shape [batch_size, length, d_features]}
+#
+#             Returns:
+#                 x {Tensor, shape [batch_size, length, d_features]}
+#
+#         '''
+#         residual = x
+#         output = x.transpose(1, 2)
+#         output = nn.functional.relu(self.w_1(output))
+#         output = self.w_2(output)
+#         output = output.transpose(1, 2)
+#         output = self.dropout(output)
+#         output = self.layer_norm(output + residual)
+#         return output
+
 class PositionwiseFeedForward(nn.Module):
-    ''' A two-1x1 Conv-layer bottleneck module '''
+    ''' A two-feed-forward-layer module '''
 
     def __init__(self, d_in, d_hid, dropout=0.1):
         super().__init__()
-        self.w_1 = nn.Conv1d(d_in, d_hid, 1)  # position-wise
-        self.w_2 = nn.Conv1d(d_hid, d_in, 1)  # position-wise
-        self.layer_norm = nn.LayerNorm(d_in)
+        self.w_1 = nn.Linear(d_in, d_hid) # position-wise
+        self.w_2 = nn.Linear(d_hid, d_in) # position-wise
+        self.layer_norm = nn.LayerNorm(d_in, eps=1e-6)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
@@ -245,11 +275,13 @@ class PositionwiseFeedForward(nn.Module):
                 x {Tensor, shape [batch_size, length, d_features]}
 
         '''
+
         residual = x
-        output = x.transpose(1, 2)
-        output = nn.functional.relu(self.w_1(output))
-        output = self.w_2(output)
-        output = output.transpose(1, 2)
-        output = self.dropout(output)
-        output = self.layer_norm(output + residual)
-        return output
+        x = self.layer_norm(x)
+        x = self.w_1(x)
+        x = nn.functional.relu(x)
+        x = self.w_2(x)
+        x = self.dropout(x)
+        x += residual
+
+        return x
