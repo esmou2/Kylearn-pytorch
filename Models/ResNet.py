@@ -1,48 +1,18 @@
 from framework.model import Model
 from Modules.linear import LinearClassifier
-from Modules.transformer import *
-from Layers.transformer import *
-from Layers.encodings import *
-from torch.optim.adam import Adam
+from Modules.ResNet import ResNet
+from Layers.encodings import SinusoidPositionEncoding
 from torch.optim.adamw import AdamW
 from Training.losses import *
 from Training.evaluation import accuracy, precision_recall, Evaluator
 from Training.control import TrainingControl, EarlyStopping
 from tqdm import tqdm
 
-def parse_data_enc(input_sequence, embedding):
-    '''
-    Returns:
-        enc_output {Tensor, [batch_size, seq_length, d_v]} --
-        non_pad_mask {Tensor, [n_head, seq_length, 1]} --
-        slf_attn_mask {Tensor, [batch_size, seq_length, seq_length]} --
-    '''
 
-    slf_attn_mask = get_attn_key_pad_mask(seq_k=input_sequence, seq_q=input_sequence,
-                                          padding_idx=0)  # [batch_size, seq_length, seq_length]
-    non_pad_mask = get_non_pad_mask(input_sequence, padding_idx=0)  # [batch_size, seq_length, 1]
-
-    embedding_sequence = embedding(input_sequence)
-
-    return embedding_sequence, non_pad_mask, slf_attn_mask
-
-
-def parse_data_dec(input_sequence, target_sequence, embedding):
-    non_pad_mask = get_non_pad_mask(target_sequence)
-
-    slf_attn_mask_subseq = get_subsequent_mask(target_sequence)
-    slf_attn_mask_keypad = get_attn_key_pad_mask(seq_k=target_sequence, seq_q=target_sequence)
-    slf_attn_mask = (slf_attn_mask_keypad + slf_attn_mask_subseq).gt(0)
-
-    dec_enc_attn_mask = get_attn_key_pad_mask(seq_k=input_sequence, seq_q=target_sequence)
-
-    embedding_sequence = embedding(target_sequence)
-    return embedding_sequence, non_pad_mask, slf_attn_mask, dec_enc_attn_mask
-
-
-class TransormerClassifierModel(Model):
+class ResNetClassifierModel(Model):
     def __init__(
-            self, save_path, log_path, d_features, d_meta, max_length, d_classifier, n_classes, threshold=None, embedding=None,
+            self, save_path, log_path, d_features, d_meta, max_length, d_classifier, n_classes, threshold=None,
+            embedding=None,
             stack='Encoder', position_encode='SinusoidPositionEncoding', optimizer=None, **kwargs):
         '''**kwargs: n_layers, n_head, dropout, use_bottleneck, d_bottleneck'''
 
@@ -50,21 +20,16 @@ class TransormerClassifierModel(Model):
         self.d_output = n_classes
         self.threshold = threshold
         self.max_length = max_length
-        
+
         # ----------------------------- Model ------------------------------ #
-        stack_dict = {
-            'Plain': Plain,
-            'Encoder': Encoder,
-            'Transformer': Transformer
-        }
+
         encoding_dict = {
             'SinusoidPositionEncoding': SinusoidPositionEncoding,
-            'LinearPositionEncoding': LinearPositionEncoding,
-            'TimeFacilityEncoding': TimeFacilityEncoding
         }
 
-        self.model = stack_dict[stack](encoding_dict[position_encode], d_features=d_features, max_seq_length=max_length, d_meta=d_meta, **kwargs)
-        
+        self.model = ResNet[stack](encoding_dict[position_encode], d_features=d_features, max_seq_length=max_length,
+                                       d_meta=d_meta, **kwargs)
+
         # --------------------------- Embedding  --------------------------- #
         if len(embedding) == 0:
             self.word_embedding = None
@@ -76,9 +41,22 @@ class TransormerClassifierModel(Model):
 
         # --------------------------- Classifier --------------------------- #
         self.classifier = LinearClassifier(d_features * max_length, d_classifier, n_classes)
-        
+
         # ------------------------------ CUDA ------------------------------ #
-        self.data_parallel()
+        # If GPU available, move the graph to GPU(s)
+        self.CUDA_AVAILABLE = self.check_cuda()
+        if self.CUDA_AVAILABLE:
+            device_ids = list(range(torch.cuda.device_count()))
+            self.model = nn.DataParallel(self.model, device_ids)
+            self.classifier = nn.DataParallel(self.classifier, device_ids)
+            self.model.to('cuda')
+            self.classifier.to('cuda')
+            assert (next(self.model.parameters()).is_cuda)
+            assert (next(self.classifier.parameters()).is_cuda)
+            pass
+
+        else:
+            print('CUDA not found or not enabled, use CPU instead')
 
         # ---------------------------- Optimizer --------------------------- #
         self.parameters = list(self.model.parameters()) + list(self.classifier.parameters())
@@ -108,6 +86,8 @@ class TransormerClassifierModel(Model):
         if device == 'cuda':
             assert self.CUDA_AVAILABLE
         # Set model and classifier training mode
+        self.model.train()
+        self.classifier.train()
 
         total_loss = 0
         batch_counter = 0
@@ -117,13 +97,10 @@ class TransormerClassifierModel(Model):
                 train_dataloader, mininterval=1,
                 desc='  - (Training)   ', leave=False):  # training_data should be a iterable
 
-            self.model.train()
-            self.classifier.train()
-
             # get data from dataloader
 
             index, position, y = map(lambda x: x.to(device), batch)
-            
+
             batch_size = len(index)
 
             input_feature_sequence, non_pad_mask, slf_attn_mask = parse_data_enc(index, self.word_embedding)
@@ -247,22 +224,20 @@ class TransormerClassifierModel(Model):
             self.summary_writer.add_scalar('precision/eval', pre_avg, step)
             self.summary_writer.add_scalar('recall/eval', rec_avg, step)
 
-
             state_dict = self.early_stopping(loss_avg)
 
             if state_dict['save']:
                 checkpoint = self.checkpoint(step)
-                self.save_model(checkpoint, self.save_path + '-step-%d_loss-%.5f'%(step,loss_avg))
+                self.save_model(checkpoint, self.save_path + '-step-%d_loss-%.5f' % (step, loss_avg))
 
             return state_dict['break']
-
 
     def train(self, max_epoch, lr, train_dataloader, eval_dataloader, device,
               smoothing=False, earlystop=False, save_mode='best'):
         assert save_mode in ['all', 'best']
 
         if not (lr is None):
-            self.set_optimizer(Adam, lr, betas=(0.9, 0.999), weight_decay=0)
+            self.set_optimizer(AdamW, lr, betas=(0.9, 0.999), weight_decay=0.001)
 
         if self.USE_EMBEDDING:
             self.word_embedding = self.word_embedding.to(device)
@@ -282,8 +257,9 @@ class TransormerClassifierModel(Model):
 
         self.save_model(checkpoint, self.save_path + '-step-%d' % state_dict['step'])
 
-        self.train_logger.info('[INFO]: Finish Training, ends with %d epoch(s) and %d batches, in total %d training steps.' % (
-            state_dict['epoch'] - 1, state_dict['batch'], state_dict['step']))
+        self.train_logger.info(
+            '[INFO]: Finish Training, ends with %d epoch(s) and %d batches, in total %d training steps.' % (
+                state_dict['epoch'] - 1, state_dict['batch'], state_dict['step']))
 
     def get_predictions(self, data_loader, device, max_batches=None, activation=None):
 
@@ -326,5 +302,3 @@ class TransormerClassifierModel(Model):
                         break
 
         return pred_list, real_list
-
-

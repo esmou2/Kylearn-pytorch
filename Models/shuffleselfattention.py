@@ -28,6 +28,15 @@ class ShuffleSelfAttentionModel(Model):
             stack='ShuffleSelfAttention', expansion_layer='ChannelWiseConvExpansion', mode='1d', optimizer=None, **kwargs):
         '''*args: n_layers, n_head, n_channel, n_vchannel, dropout, use_bottleneck, d_bottleneck'''
 
+        '''
+            Arguments:
+                mode:   1d:         1d output
+                        2d:         2d output
+                        residual:   residual output
+                        dense:      dense net
+        
+        '''
+
         super().__init__(save_path, log_path)
         self.d_output = d_output
         self.threshold = threshold
@@ -38,7 +47,8 @@ class ShuffleSelfAttentionModel(Model):
             'SelfAttention': SelfAttentionStack,
             'Alternate': AlternateStack,
             'Parallel': ParallelStack,
-            'ShuffleSelfAttention': ShuffleSelfAttentionStack
+            'ShuffleSelfAttention': ShuffleSelfAttentionStack,
+            'ShuffleSelfAttentionStackV2': ShuffleSelfAttentionStackV2,
         }
         expansion_dict = {
             'LinearExpansion': LinearExpansion,

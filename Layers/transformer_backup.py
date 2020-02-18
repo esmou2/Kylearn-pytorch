@@ -73,10 +73,10 @@ class EncoderLayer(nn.Module):
 
         enc_output, encoder_self_attn = self.self_attn(
             enc_input, enc_input, enc_input, mask=slf_attn_mask)
-        ## enc_output *= non_pad_mask
+        enc_output *= non_pad_mask
 
         enc_output = self.bottleneck(enc_output)
-        ## enc_output *= non_pad_mask
+        enc_output *= non_pad_mask
 
         return enc_output, encoder_self_attn
 
@@ -125,40 +125,6 @@ class DecoderLayer(nn.Module):
         return dec_output, dec_slf_attn, dec_enc_attn
 
 
-# class ScaledDotProductAttention(nn.Module):
-#     ''' Scaled Dot-Product Attention '''
-#
-#     def __init__(self, temperature, attn_dropout=0.1):
-#         super().__init__()
-#         self.temperature = temperature
-#         self.dropout = nn.Dropout(attn_dropout)
-#         self.softmax = nn.Softmax(dim=2)
-#
-#     def forward(self, query, key, value, mask=None):
-#         '''
-#             Arguments:
-#                 query {Tensor, shape [n_head * batch, q_length, dk]} -- query
-#                 key {Tensor, shape [n_head * batch, k_length, dk]} -- key
-#                 value {Tensor, shape [n_head * batch, v_length, dv]} -- value
-#                 mask {Tensor, shape [n_head * batch, q_length, k_length]} --self attn mask
-#
-#             Returns:
-#                 output {Tensor, shape [n_head * batch, q_length, dv] -- output
-#                 attn {Tensor, shape [n_head * batch, q_length, k_length] -- self attention
-#
-#         '''
-#         attn = torch.bmm(query, key.transpose(1, 2)) # [n_head * batch, q_length, k_length]
-#         attn = attn / self.temperature
-#
-#         if mask is not None:
-#             attn = attn.masked_fill(mask, -np.inf)
-#
-#         attn = self.softmax(attn) # softmax over k_length
-#         attn = self.dropout(attn)
-#         output = torch.bmm(attn, value)
-#
-#         return output, attn
-
 class ScaledDotProductAttention(nn.Module):
     ''' Scaled Dot-Product Attention '''
 
@@ -166,32 +132,33 @@ class ScaledDotProductAttention(nn.Module):
         super().__init__()
         self.temperature = temperature
         self.dropout = nn.Dropout(attn_dropout)
-        self.softmax = nn.functional.softmax
+        self.softmax = nn.Softmax(dim=2)
 
     def forward(self, query, key, value, mask=None):
         '''
             Arguments:
-                query {Tensor, shape [ batch, n_head, q_length, dk]} -- query
-                key {Tensor, shape [ batch, n_head, k_length, dk]} -- key
-                value {Tensor, shape [ batch, n_head, k_length, dv]} -- value
-                mask {Tensor, shape [batch, 1, q_length, k_length]} --self attn mask
+                query {Tensor, shape [n_head * batch, q_length, dk]} -- query
+                key {Tensor, shape [n_head * batch, k_length, dk]} -- key
+                value {Tensor, shape [n_head * batch, v_length, dv]} -- value
+                mask {Tensor, shape [n_head * batch, q_length, k_length]} --self attn mask
 
             Returns:
                 output {Tensor, shape [n_head * batch, q_length, dv] -- output
                 attn {Tensor, shape [n_head * batch, q_length, k_length] -- self attention
 
         '''
-        attn = torch.matmul(query / self.temperature, key.transpose(2, 3)) # [batch, n_head, q_length, k_length]
+        attn = torch.bmm(query, key.transpose(1, 2)) # [n_head * batch, q_length, k_length]
+        attn = attn / self.temperature
 
         if mask is not None:
             attn = attn.masked_fill(mask, -np.inf)
 
-        attn = self.softmax(attn, dim=-1) # softmax over k_length
-        attn = self.dropout(attn)  # [batch, n_head, q_length, k_length]
-        output = torch.matmul(attn, value)  # [batch, n_head, q_length, dv]
-        # output = value
+        attn = self.softmax(attn) # softmax over k_length
+        attn = self.dropout(attn)
+        output = torch.bmm(attn, value)
 
         return output, attn
+
 
 class MultiHeadAttention(nn.Module):
     def __init__(self, n_head, d_features, d_k, d_v, dropout=0.1):
@@ -203,16 +170,16 @@ class MultiHeadAttention(nn.Module):
         self.w_qs = nn.Linear(d_features, n_head * d_k, bias=False)
         self.w_ks = nn.Linear(d_features, n_head * d_k, bias=False)
         self.w_vs = nn.Linear(d_features, n_head * d_v, bias=False)
-        # nn.init.normal_(self.w_qs.weight, mean=0, std=np.sqrt(2.0 / (d_features + d_k)))
-        # nn.init.normal_(self.w_ks.weight, mean=0, std=np.sqrt(2.0 / (d_features + d_k)))
-        # nn.init.normal_(self.w_vs.weight, mean=0, std=np.sqrt(2.0 / (d_features + d_v)))
+        nn.init.normal_(self.w_qs.weight, mean=0, std=np.sqrt(2.0 / (d_features + d_k)))
+        nn.init.normal_(self.w_ks.weight, mean=0, std=np.sqrt(2.0 / (d_features + d_k)))
+        nn.init.normal_(self.w_vs.weight, mean=0, std=np.sqrt(2.0 / (d_features + d_v)))
 
         self.attention = ScaledDotProductAttention(temperature=np.power(d_k, 0.5))
         self.dropout = nn.Dropout(dropout)
         self.layer_norm = nn.LayerNorm(d_features)
 
         self.fc = nn.Linear(n_head * d_v, d_features, bias=False)
-        # nn.init.xavier_normal_(self.fc.weight)
+        nn.init.xavier_normal_(self.fc.weight)
 
 
     def forward(self, query, key, value, mask=None):
@@ -244,29 +211,52 @@ class MultiHeadAttention(nn.Module):
         key = self.w_ks(key).view(sz_b, len_k, n_head, d_k)
         value = self.w_vs(value).view(sz_b, len_v, n_head, d_v)
 
-        # query = query.permute(2, 0, 1, 3).contiguous().view(-1, len_q, d_k)  # [n_head * batch_size, seq_length, dk]
-        # key = key.permute(2, 0, 1, 3).contiguous().view(-1, len_k, d_k)  # (n*b) x lk x dk
-        # value = value.permute(2, 0, 1, 3).contiguous().view(-1, len_v, d_v)  # (n*b) x lv x dv
-
-        query = query.transpose(1, 2).contiguous()  # [batch_size, n_head, seq_length, dq]
-        key = key.transpose(1, 2).contiguous()
-        value = value.transpose(1, 2).contiguous()
+        query = query.permute(2, 0, 1, 3).contiguous().view(-1, len_q, d_k)  # [n_head * batch_size, seq_length, dk]
+        key = key.permute(2, 0, 1, 3).contiguous().view(-1, len_k, d_k)  # (n*b) x lk x dk
+        value = value.permute(2, 0, 1, 3).contiguous().view(-1, len_v, d_v)  # (n*b) x lv x dv
 
         if len(mask) != 0:
-            # mask = mask.repeat(n_head, 1, 1)  # [n_head * batch_size, seq_length, seq_length]
-            mask = mask.unsqueeze(1)
-        output, attn = self.attention(query, key, value, mask=mask)  # [batch, n_head, q_length, dv]
+            mask = mask.repeat(n_head, 1, 1)  # [n_head * batch_size, seq_length, seq_length]
 
-        # output = output.view(sz_b, n_head, len_q, d_v)
-        # output = output.permute(0, 2, 1, 3).contiguous().view(sz_b, len_q, -1)  # b x lq x (n*dv)
+        output, attn = self.attention(query, key, value, mask=mask)
 
-        output = output.transpose(1, 2).contiguous().view(sz_b, len_v, -1)
-        output = self.fc(output)
-        output = self.dropout(output)
+        output = output.view(n_head, sz_b, len_q, d_v)
+        output = output.permute(1, 2, 0, 3).contiguous().view(sz_b, len_q, -1)  # b x lq x (n*dv)
+
+        output = self.dropout(self.fc(output))
         output = output + residual
+        # output = self.layer_norm(output + residual)
 
         return output, attn
 
+
+# class PositionwiseFeedForward(nn.Module):
+#     ''' A two-1x1 Conv-layer bottleneck module '''
+#
+#     def __init__(self, d_in, d_hid, dropout=0.1):
+#         super().__init__()
+#         self.w_1 = nn.Conv1d(d_in, d_hid, 1, bias=False)  # position-wise
+#         self.w_2 = nn.Conv1d(d_hid, d_in, 1, bias=False)  # position-wise
+#         self.layer_norm = nn.LayerNorm(d_in)
+#         self.dropout = nn.Dropout(dropout)
+#
+#     def forward(self, x):
+#         '''
+#             Arguments:
+#                 x {Tensor, shape [batch_size, length, d_features]}
+#
+#             Returns:
+#                 x {Tensor, shape [batch_size, length, d_features]}
+#
+#         '''
+#         residual = x
+#         output = x.transpose(1, 2)
+#         output = nn.functional.relu(self.w_1(output))
+#         output = self.w_2(output)
+#         output = output.transpose(1, 2)
+#         output = self.dropout(output)
+#         output = self.layer_norm(output + residual)
+#         return output
 
 class PositionwiseFeedForward(nn.Module):
     ''' A two-feed-forward-layer module '''
