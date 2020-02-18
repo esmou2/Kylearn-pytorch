@@ -63,7 +63,7 @@ class TextualDataloader():
         valid_sampler = SubsetRandomSampler(eval_indices)
 
         self.train_loader = DataLoader(train_set, batch_size, sampler=train_sampler, num_workers=4)
-        self.val_loader = DataLoader(train_set, batch_size, sampler=valid_sampler, num_workers=4)
+        self.val_loader = DataLoader(test_set, batch_size, sampler=valid_sampler, num_workers=4)
         self.test_loader = DataLoader(test_set, batch_size, num_workers=4)
 
 
