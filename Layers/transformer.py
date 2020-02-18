@@ -73,10 +73,10 @@ class EncoderLayer(nn.Module):
 
         enc_output, encoder_self_attn = self.self_attn(
             enc_input, enc_input, enc_input, mask=slf_attn_mask)
-        # enc_output *= non_pad_mask
+        ## enc_output *= non_pad_mask
 
         enc_output = self.bottleneck(enc_output)
-        # enc_output *= non_pad_mask
+        ## enc_output *= non_pad_mask
 
         return enc_output, encoder_self_attn
 
