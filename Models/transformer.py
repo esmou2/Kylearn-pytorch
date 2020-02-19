@@ -257,12 +257,12 @@ class TransormerClassifierModel(Model):
             return state_dict['break']
 
 
-    def train(self, max_epoch, lr, train_dataloader, eval_dataloader, device,
+    def train(self, max_epoch, train_dataloader, eval_dataloader, device,
               smoothing=False, earlystop=False, save_mode='best'):
         assert save_mode in ['all', 'best']
 
-        if not (lr is None):
-            self.set_optimizer(Adam, lr, betas=(0.9, 0.999), weight_decay=0)
+        # if not (lr is None):
+        #     self.set_optimizer(Adam, lr, betas=(0.9, 0.999), weight_decay=0)
 
         if self.USE_EMBEDDING:
             self.word_embedding = self.word_embedding.to(device)
