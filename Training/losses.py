@@ -10,22 +10,19 @@ def cross_entropy_loss(logits, real, smoothing=False):
     if smoothing:
         eps = 0.1
         n_class = logits.size(1)
-
-        one_hot = torch.zeros_like(logits).scatter(1, real.view(-1, 1), 1)
-        one_hot = one_hot * (1 - eps) + (1 - one_hot) * eps / (n_class - 1)
-        log_prb = F.log_softmax(logits, dim=1)
-
-        non_pad_mask = real.ne(0)
-        loss = -(one_hot * log_prb).sum(dim=1)
-        loss = loss.masked_select(non_pad_mask).sum()  # average later
+        pred = logits.log_softmax(dim=1)
+        with torch.no_grad():
+            # true_dist = pred.data.clone()
+            true_dist = torch.zeros_like(pred)
+            true_dist.fill_(eps / (n_class - 1))
+            true_dist.scatter_(1, real.data.unsqueeze(1), 1 - eps)
+        return torch.mean(torch.sum(-true_dist * pred, dim=1))
     else:
         # loss = F.cross_entropy(logits, real, ignore_index=0, reduction='sum')
         loss = F.cross_entropy(logits, real)
-
-    return loss
+        return loss
 
 
 def mse_loss(pred, real):
     loss = F.mse_loss(pred, real)
-
     return loss
