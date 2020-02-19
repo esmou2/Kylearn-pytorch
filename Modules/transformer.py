@@ -70,6 +70,8 @@ class Encoder(nn.Module):
             EncoderLayer(d_features, n_head, d_k, d_v, dropout, use_bottleneck=use_bottleneck, d_bottleneck=d_bottleneck)
             for _ in range(n_layers)])
 
+        self.layer_norm = nn.LayerNorm(d_features)
+
     def forward(self, feature_sequence, position, non_pad_mask=None, slf_attn_mask=None):
         '''
             Arguments:
@@ -98,6 +100,8 @@ class Encoder(nn.Module):
                 slf_attn_mask=slf_attn_mask)
 
             encoder_self_attn_list += [encoder_self_attn]
+
+        enc_output = self.layer_norm(enc_output)
 
         return enc_output, encoder_self_attn_list
 
