@@ -51,6 +51,8 @@ class Plain(nn.Module):
 class Encoder(nn.Module):
     ''' A encoder models with self attention mechanism. '''
 
+    # TIP: NO USING LAYER_NORM AT THE END OF THIS MODULE
+
     def __init__(
             self, position_encoding_layer, n_layers, n_head, d_features, max_seq_length, d_meta, d_k=None, d_v=None, dropout=0.1, use_bottleneck=True, d_bottleneck=256):
         super().__init__()
@@ -69,6 +71,7 @@ class Encoder(nn.Module):
         self.layer_stack = nn.ModuleList([
             EncoderLayer(d_features, n_head, d_k, d_v, dropout, use_bottleneck=use_bottleneck, d_bottleneck=d_bottleneck)
             for _ in range(n_layers)])
+        self.dropout = nn.Dropout(dropout)
 
         self.layer_norm = nn.LayerNorm(d_features)
 
@@ -87,11 +90,11 @@ class Encoder(nn.Module):
         '''
 
         encoder_self_attn_list = []
-        enc_output = feature_sequence
 
         # Add position information at the beginning
         pos_enc = self.position_enc(position)
         enc_output = feature_sequence + pos_enc
+        enc_output = self.dropout(enc_output)
 
         for enc_layer in self.layer_stack:
             enc_output, encoder_self_attn = enc_layer(
