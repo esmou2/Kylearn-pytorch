@@ -51,8 +51,6 @@ class Plain(nn.Module):
 class Encoder(nn.Module):
     ''' A encoder models with self attention mechanism. '''
 
-    # TIP: NO USING LAYER_NORM AT THE END OF THIS MODULE
-
     def __init__(
             self, position_encoding_layer, n_layers, n_head, d_features, max_seq_length, d_meta, d_k=None, d_v=None, dropout=0.1, use_bottleneck=True, d_bottleneck=256):
         super().__init__()
