@@ -4,7 +4,6 @@ from torch.utils.data.sampler import SubsetRandomSampler
 from Dataloader.samplers import BalanceSampler
 
 
-
 class TextualDataset(Dataset):
     def __init__(self, file_path, cut_length=None):
         super().__init__()
@@ -36,6 +35,7 @@ class TextualDataset(Dataset):
 
         return sample
 
+
 class TextualDataloader():
     def __init__(self, train_path, test_path, batch_size, eval_portion, cut_length=None, shuffle=True):
         train_set = TextualDataset(train_path, cut_length=cut_length)
@@ -61,11 +61,11 @@ class TextualDataloader():
         train_sampler = SubsetRandomSampler(train_indices)
         # train_sampler = BalanceSampler(train_set.targets, train_indices)
         valid_sampler = SubsetRandomSampler(eval_indices)
+        test_sampler = SubsetRandomSampler(test_indices)
 
         self.train_loader = DataLoader(train_set, batch_size, sampler=train_sampler, num_workers=4)
         self.val_loader = DataLoader(test_set, batch_size, sampler=valid_sampler, num_workers=4)
-        self.test_loader = DataLoader(test_set, batch_size, num_workers=4)
-
+        self.test_loader = DataLoader(test_set, batch_size, sampler=test_sampler, num_workers=4)
 
     def train_dataloader(self):
         return self.train_loader
