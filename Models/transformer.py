@@ -66,7 +66,7 @@ class TransormerClassifierModel(Model):
         self.model = stack_dict[stack](encoding_dict[position_encode], d_features=d_features, max_seq_length=max_length, d_meta=d_meta, **kwargs)
         
         # --------------------------- Embedding  --------------------------- #
-        if len(embedding) == 0:
+        if embedding is None:
             self.word_embedding = None
             self.USE_EMBEDDING = False
 
@@ -109,7 +109,6 @@ class TransormerClassifierModel(Model):
             assert self.CUDA_AVAILABLE
         # Set model and classifier training mode
 
-        total_loss = 0
         batch_counter = 0
 
         # update param per batch
@@ -153,7 +152,6 @@ class TransormerClassifierModel(Model):
             acc = accuracy(pred, y, threshold=self.threshold)
             precision, recall, precision_avg, recall_avg = precision_recall(pred, y, self.d_output,
                                                                             threshold=self.threshold)
-            total_loss += loss.item()
             batch_counter += 1
 
             # training control
@@ -192,9 +190,6 @@ class TransormerClassifierModel(Model):
 
         # use evaluator to calculate the average performance
         evaluator = Evaluator()
-
-        pred_list = []
-        real_list = []
 
         with torch.no_grad():
 
