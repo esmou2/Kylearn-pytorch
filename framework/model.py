@@ -1,6 +1,7 @@
 from abc import abstractmethod
 from utils.loggings import logger
 import torch
+import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 
 class Model():
@@ -30,6 +31,22 @@ class Model():
     @abstractmethod
     def checkpoint(self, **kwargs):
         pass
+
+    def data_parallel(self):
+        # If GPU available, move the graph to GPU(s)
+        self.CUDA_AVAILABLE = self.check_cuda()
+        if self.CUDA_AVAILABLE:
+            device_ids = list(range(torch.cuda.device_count()))
+            self.model = nn.DataParallel(self.model, device_ids)
+            self.classifier = nn.DataParallel(self.classifier, device_ids)
+            self.model.to('cuda')
+            self.classifier.to('cuda')
+            assert (next(self.model.parameters()).is_cuda)
+            assert (next(self.classifier.parameters()).is_cuda)
+            pass
+
+        else:
+            print('CUDA not found or not enabled, use CPU instead')
 
     def set_optimizer(self, Optimizer, lr, **kwargs):
         self.optimizer = Optimizer(self.parameters, lr=lr, **kwargs)
@@ -79,6 +96,9 @@ class Model():
             assert self.model != None
             model_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
             print('Number of Model Parameters: %d'%model_params)
+            for name, param in self.model.named_parameters():
+                if param.requires_grad:
+                    print(name, param.numel())
         except:
             print('No Model specified')
 
@@ -86,6 +106,9 @@ class Model():
             assert self.classifier != None
             classifier = sum(p.numel() for p in self.classifier.parameters() if p.requires_grad)
             print('Number of Model Classifier: %d' % classifier)
+            for name, param in self.classifier.named_parameters():
+                if param.requires_grad:
+                    print(name, param.numel())
         except:
             print('No Classifier specified')
 

@@ -1,91 +1,198 @@
 from framework.model import Model
 from Modules.linear import LinearClassifier
-from Modules.transformer import *
-from Layers.transformer import *
-from Layers.encodings import *
-from torch.optim.adam import Adam
+import torch
+import torch.nn as nn
+import numpy as np
 from torch.optim.adamw import AdamW
-
 from Training.losses import *
 from Training.evaluation import accuracy, precision_recall, Evaluator
 from Training.control import TrainingControl, EarlyStopping
+from Layers.expansions import feature_shuffle_index
 from tqdm import tqdm
+from utils.plot_curves import precision_recall as pr
+from utils.plot_curves import plot_pr_curve
 
 
-def get_attn_mask(padding):
-    '''
-        Arguments:
-            padding {Tensor, np.int64 [batch, t*max_length, 1]} -- padding index, 1 means is padded
-        Returns:
-            non_pad_mask {Tensor, [batch, t*max_length, 1]} -- 0 means is padded
-            slf_attn_mask {Tensor, [batch, t*max_length, t*max_length]} -- True means is padded
-    '''
-    padding = padding.squeeze(-1)
-    slf_attn_mask = get_attn_key_pad_mask(seq_k=padding, seq_q=padding,
-                                          padding_idx=1)  # [batch, t*max_length, t*max_length]
-    non_pad_mask = ~padding.unsqueeze(-1).bool()  # [batch, t*max_length, 1]
-    non_pad_mask = non_pad_mask.float()
+def parse_data(batch, device):
+    # get data from dataloader
+    try:
+        feature_1, feature_2, y = map(lambda x: x.to(device), batch)
+    except:
+        feature_1, y = map(lambda x: x.to(device), batch)
+        feature_2 = None
 
-    return non_pad_mask, slf_attn_mask
+    return feature_1, feature_2, y
 
 
-class CienaTransformerModel(Model):
-    def __init__(
-            self, save_path, log_path, d_features, d_meta, max_length, d_classifier, n_classes, threshold=None,
-            optimizer=None, **kwargs):
-        '''**kwargs: n_layers, n_head, dropout, use_bottleneck, d_bottleneck'''
+class ScaledDotProduction(nn.Module):
+    '''Scaled Dot Production'''
+
+    def __init__(self, temperature, attn_dropout=0.1):
+        super().__init__()
+        self.temperature = temperature
+        self.dropout = nn.Dropout(attn_dropout)
+        self.softmax = nn.Softmax(dim=2)
+
+    def forward(self, query, key, value):
         '''
             Arguments:
-                save_path -- model file path
-                log_path -- log file path
-                d_features -- how many PMs
-                d_meta -- how many facility types
-                max_length -- input sequence length
-                d_classifier -- classifier hidden unit
-                n_classes -- output dim
-                threshold -- if not None, n_classes should be 1 (regression).
-        '''
+                query {Tensor, shape: [batch, d_k, d_out]} -- query
+                key {Tensor, shape: [batch, d_k, n_candidate]} -- key
+                value {Tensor, shape: [batch, d_v, n_candidate]} -- value
 
+            Returns:
+                output {Tensor, shape [n_head * batch, n_depth, n_vchannel * d_features] -- output
+                attn {Tensor, shape [n_head * batch, n_depth, n_depth] -- reaction attention
+        '''
+        attn = torch.bmm(query.transpose(2, 1), key)  # [batch, d_out, n_candidate]
+        # How should we set the temperature
+        attn = attn / self.temperature
+
+        attn = self.softmax(attn)  # softmax over d_f1
+        attn = self.dropout(attn)
+        output = torch.bmm(attn, value.transpose(2, 1))  # [batch, d_out, d_v]
+
+        return output, attn
+
+
+class Bottleneck(nn.Module):
+    def __init__(self, d_in, d_hid, dropout=0.1):
+        super().__init__()
+        self.w_1 = nn.Linear(d_in, d_hid)
+        self.w_2 = nn.Linear(d_hid, d_in)
+        self.layer_norm = nn.LayerNorm(d_in, eps=1e-6)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, features):
+        residual = features
+        features = self.layer_norm(features)
+
+        features = self.w_2(F.relu(self.w_1(features)))
+        features = self.dropout(features)
+        features += residual
+
+        return features
+
+
+class SelfAttentionLayer(nn.Module):
+    def __init__(self, d_features, d_out, kernel, stride, d_k, d_v, n_replica, shuffled_index, dropout=0.1):
+        super().__init__()
+        self.d_features = d_features
+        self.d_out = d_out
+        self.stride = np.ceil(np.divide(d_features, d_out)).astype(int)
+        self.n_replica = n_replica
+        self.shuffled_index = shuffled_index
+
+        self.query = nn.Conv1d(1, d_k, self.stride, self.stride, bias=False)
+        self.key = nn.Conv1d(1, d_k, kernel, stride, bias=False)
+        self.value = nn.Conv1d(1, d_v, kernel, stride, bias=False)
+        self.conv = nn.Conv1d(d_v, 1, 1, 1, bias=False)
+
+        self.query.initialize_param(nn.init.xavier_normal_)
+        self.key.initialize_param(nn.init.xavier_normal_)
+        self.value.initialize_param(nn.init.xavier_normal_)
+        nn.init.xavier_normal(self.conv.weight)
+
+
+        self.attention = ScaledDotProduction(temperature=1)
+
+        self.layer_norm = nn.LayerNorm(d_features)
+        self.dropout = nn.Dropout(dropout)
+
+        ### Use Bottleneck? ###
+        self.bottleneck = Bottleneck(d_out, d_out)
+
+
+    def forward(self, features):
+        '''
+            Arguments:
+                feature_1 {Tensor, shape [batch, d_features]} -- features
+
+            Returns:
+                output {Tensor, shape [batch, d_features]} -- output
+                attn {Tensor, shape [n_head * batch, d_features, d_features]} -- self attention
+        '''
+        d_features, d_out, n_replica, shuffled_index \
+            = self.d_features, self.d_out, self.n_replica, self.shuffled_index
+
+        residual = features
+
+        query = self.layer_norm(features)
+
+        # d_features_ceil = d_out * stride
+        #
+        # features = F.pad(features, (0, d_features_ceil - d_features), value=0)  # shape: [batch, d_features_ceil]
+
+        shuffled_features = features[:, self.index]  # shape: [batch, n_replica * d_features]
+
+        query = self.query(query)  # shape: [batch, d_k, d_out]
+        key = self.key(
+            shuffled_features)  # shape: [batch, d_k, n_candidate], n_candidate = (n_replica * d_features) / stride
+        value = self.value(shuffled_features)  # shape: [batch, d_v, n_candidate]
+
+        output, attn = self.attention(query, key, value)  # shape: [batch, d_out, d_v], [batch, d_out, n_candidate]
+        output = output.transpose(2, 1).contiguous()  # shape: [batch, d_v, d_out]
+        output = self.conv(output).view(-1, d_out)  # shape: [batch, d_out]
+        output = self.dropout(output)
+
+        if d_features == d_out:
+            output += residual
+
+        ### Use Bottleneck? ###
+        output = self.bottleneck(output)
+
+        return output, attn
+
+
+class SelfAttentionFeatureSelection(nn.Module):
+    def __init__(self, d_features, d_out_list):
+        super().__init__()
+        self.index = feature_shuffle_index(d_features, 8)
+        self.layers = nn.ModuleList([
+            SelfAttentionLayer(d_features, d_out, kernel=3, stride=3, d_k=32, d_v=32, n_replica=8,
+                               shuffled_index=self.index) for d_out in d_out_list])
+
+    def forward(self, features, feature_2=None):
+        self_attn_list = []
+
+        for layer in self.layers:
+            features, self_attn = layer(
+                features)
+            self_attn_list += [self_attn]
+
+        return features, self_attn_list
+
+
+class SAFSModel(Model):
+    def __init__(
+            self, save_path, log_path, d_features, d_out_list, d_classifier, d_output, threshold=None, optimizer=None,
+            **kwargs):
+        '''*args: n_layers, n_head, n_channel, n_vchannel, dropout'''
         super().__init__(save_path, log_path)
-        self.d_output = n_classes
+        self.d_output = d_output
         self.threshold = threshold
-        self.max_length = max_length
 
         # ----------------------------- Model ------------------------------ #
 
-        self.model = Encoder(TimeFacilityEncoding, d_features=d_features, max_seq_length=max_length,
-                                       d_meta=d_meta, **kwargs)
+        self.model = SelfAttentionFeatureSelection(d_features, d_out_list)
 
         # --------------------------- Classifier --------------------------- #
-        self.classifier = LinearClassifier(d_features * max_length, d_classifier, n_classes)
+
+        self.classifier = LinearClassifier(d_features, d_classifier, d_output)
 
         # ------------------------------ CUDA ------------------------------ #
-        # If GPU available, move the graph to GPU(s)
-        self.CUDA_AVAILABLE = self.check_cuda()
-        if self.CUDA_AVAILABLE:
-            device_ids = list(range(torch.cuda.device_count()))
-            self.model = nn.DataParallel(self.model, device_ids)
-            self.classifier = nn.DataParallel(self.classifier, device_ids)
-            self.model.to('cuda')
-            self.classifier.to('cuda')
-            assert (next(self.model.parameters()).is_cuda)
-            assert (next(self.classifier.parameters()).is_cuda)
-            pass
-
-        else:
-            print('CUDA not found or not enabled, use CPU instead')
+        self.data_parallel()
 
         # ---------------------------- Optimizer --------------------------- #
         self.parameters = list(self.model.parameters()) + list(self.classifier.parameters())
         if optimizer == None:
-            self.optimizer = AdamW(self.parameters, lr=0.001, betas=(0.9, 0.999), weight_decay=0.001)
+            self.optimizer = AdamW(self.parameters, lr=0.002, betas=(0.9, 0.999), weight_decay=0.001)
 
         # ------------------------ training control ------------------------ #
         self.controller = TrainingControl(max_step=100000, evaluate_every_nstep=100, print_every_nstep=10)
         self.early_stopping = EarlyStopping(patience=50)
 
         # --------------------- logging and tensorboard -------------------- #
-        self.count_parameters()
         self.set_logger()
         self.set_summary_writer()
         # ---------------------------- END INIT ---------------------------- #
@@ -117,15 +224,13 @@ class CienaTransformerModel(Model):
 
             # get data from dataloader
 
-            input_feature_sequence, padding, time_facility, y = map(lambda x: x.to(device), batch)
+            feature_1, feature_2, y = parse_data(batch, device)
 
-            batch_size = len(y)
-
-            non_pad_mask, slf_attn_mask = get_attn_mask(padding)
+            batch_size = len(feature_1)
 
             # forward
             self.optimizer.zero_grad()
-            logits, attn = self.model(input_feature_sequence, time_facility, non_pad_mask, slf_attn_mask)
+            logits, attn = self.model(feature_1, feature_2)
             logits = logits.view(batch_size, -1)
             logits = self.classifier(logits)
 
@@ -197,14 +302,13 @@ class CienaTransformerModel(Model):
                     dataloader, mininterval=5,
                     desc='  - (Evaluation)   ', leave=False):  # training_data should be a iterable
 
-                input_feature_sequence, padding, time_facility, y = map(lambda x: x.to(device), batch)
+                # get data from dataloader
+                feature_1, feature_2, y = parse_data(batch, device)
 
-                batch_size = len(y)
-
-                non_pad_mask, slf_attn_mask = get_attn_mask(padding)
+                batch_size = len(feature_1)
 
                 # get logits
-                logits, attn = self.model(input_feature_sequence, time_facility, non_pad_mask, slf_attn_mask)
+                logits, attn = self.model(feature_1, feature_2)
                 logits = logits.view(batch_size, -1)
                 logits = self.classifier(logits)
 
@@ -223,13 +327,13 @@ class CienaTransformerModel(Model):
                 evaluator(loss.item(), acc.item(), precision[1].item(), recall[1].item())
 
                 '''append the results to the predict / real list for drawing ROC or PR curve.'''
-            #     if plot:
-            #         pred_list += pred.tolist()
-            #         real_list += y.tolist()
-            #
-            # if plot:
-            #     area, precisions, recalls, thresholds = pr(pred_list, real_list)
-            #     plot_pr_curve(recalls, precisions, auc=area)
+                if plot:
+                    pred_list += pred.tolist()
+                    real_list += y.tolist()
+
+            if plot:
+                area, precisions, recalls, thresholds = pr(pred_list, real_list)
+                plot_pr_curve(recalls, precisions, auc=area)
 
             # get evaluation results from the evaluator
             loss_avg, acc_avg, pre_avg, rec_avg = evaluator.avg_results()
@@ -252,8 +356,8 @@ class CienaTransformerModel(Model):
 
     def train(self, max_epoch, train_dataloader, eval_dataloader, device,
               smoothing=False, earlystop=False, save_mode='best'):
-        assert save_mode in ['all', 'best']
 
+        assert save_mode in ['all', 'best']
         # train for n epoch
         for epoch_i in range(max_epoch):
             print('[ Epoch', epoch_i, ']')
@@ -288,12 +392,10 @@ class CienaTransformerModel(Model):
                     data_loader,
                     desc='  - (Testing)   ', leave=False):
 
-                input_feature_sequence, padding, time_facility, y = map(lambda x: x.to(device), batch)
-
-                non_pad_mask, slf_attn_mask = get_attn_mask(padding)
+                feature_1, feature_2, y = parse_data(batch, device)
 
                 # get logits
-                logits, attn = self.model(input_feature_sequence, time_facility, non_pad_mask, slf_attn_mask)
+                logits, attn = self.model(feature_1, feature_2)
                 logits = logits.view(logits.shape[0], -1)
                 logits = self.classifier(logits)
 
@@ -311,5 +413,3 @@ class CienaTransformerModel(Model):
                         break
 
         return pred_list, real_list
-
-

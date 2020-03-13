@@ -4,6 +4,7 @@ from Modules.transformer import *
 from Layers.transformer import *
 from Layers.encodings import *
 from torch.optim.adam import Adam
+from torch.optim.adamw import AdamW
 from Training.losses import *
 from Training.evaluation import accuracy, precision_recall, Evaluator
 from Training.control import TrainingControl, EarlyStopping
@@ -52,6 +53,7 @@ class TransormerClassifierModel(Model):
         
         # ----------------------------- Model ------------------------------ #
         stack_dict = {
+            'Plain': Plain,
             'Encoder': Encoder,
             'Transformer': Transformer
         }
@@ -76,25 +78,12 @@ class TransormerClassifierModel(Model):
         self.classifier = LinearClassifier(d_features * max_length, d_classifier, n_classes)
         
         # ------------------------------ CUDA ------------------------------ #
-        # If GPU available, move the graph to GPU(s)
-        self.CUDA_AVAILABLE = self.check_cuda()
-        if self.CUDA_AVAILABLE:
-            device_ids = list(range(torch.cuda.device_count()))
-            self.model = nn.DataParallel(self.model, device_ids)
-            self.classifier = nn.DataParallel(self.classifier, device_ids)
-            self.model.to('cuda')
-            self.classifier.to('cuda')
-            assert (next(self.model.parameters()).is_cuda)
-            assert (next(self.classifier.parameters()).is_cuda)
-            pass
-
-        else:
-            print('CUDA not found or not enabled, use CPU instead')
+        self.data_parallel()
 
         # ---------------------------- Optimizer --------------------------- #
         self.parameters = list(self.model.parameters()) + list(self.classifier.parameters())
         if optimizer == None:
-            self.set_optimizer(Adam, lr=0.001, betas=(0.9, 0.999), weight_decay=0)
+            self.set_optimizer(AdamW, lr=0.001, betas=(0.9, 0.999), weight_decay=0.001)
 
         # ------------------------ training control ------------------------ #
         self.controller = TrainingControl(max_step=100000, evaluate_every_nstep=100, print_every_nstep=10)
@@ -119,8 +108,6 @@ class TransormerClassifierModel(Model):
         if device == 'cuda':
             assert self.CUDA_AVAILABLE
         # Set model and classifier training mode
-        self.model.train()
-        self.classifier.train()
 
         total_loss = 0
         batch_counter = 0
@@ -129,6 +116,9 @@ class TransormerClassifierModel(Model):
         for batch in tqdm(
                 train_dataloader, mininterval=1,
                 desc='  - (Training)   ', leave=False):  # training_data should be a iterable
+
+            self.model.train()
+            self.classifier.train()
 
             # get data from dataloader
 
@@ -267,12 +257,12 @@ class TransormerClassifierModel(Model):
             return state_dict['break']
 
 
-    def train(self, max_epoch, lr, train_dataloader, eval_dataloader, device,
+    def train(self, max_epoch, train_dataloader, eval_dataloader, device,
               smoothing=False, earlystop=False, save_mode='best'):
         assert save_mode in ['all', 'best']
 
-        if not (lr is None):
-            self.set_optimizer(AdamW, lr, betas=(0.9, 0.999), weight_decay=0.001)
+        # if not (lr is None):
+        #     self.set_optimizer(Adam, lr, betas=(0.9, 0.999), weight_decay=0)
 
         if self.USE_EMBEDDING:
             self.word_embedding = self.word_embedding.to(device)

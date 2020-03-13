@@ -15,7 +15,7 @@ save_name = 'nlp-encoder-100-'
 # Implement model
 model = TransormerClassifierModel('models/'+save_name, 'logs/'+save_name, embedding=embedding,
                                   max_length=dataloader.max_length,  n_classes=dataloader.n_targets,
-                                  d_features=100, d_k=100, d_v=100, d_meta=None, n_layers=6, n_head=8, dropout=0.1,
+                                  d_features=100, d_k=64, d_v=64, d_meta=None, n_layers=4, n_head=4, dropout=0.1,
                                   d_classifier=256, use_bottleneck=True, d_bottleneck=128)
 
 # Training
