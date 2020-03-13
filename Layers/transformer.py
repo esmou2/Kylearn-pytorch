@@ -73,10 +73,10 @@ class EncoderLayer(nn.Module):
 
         enc_output, encoder_self_attn = self.self_attn(
             enc_input, enc_input, enc_input, mask=slf_attn_mask)
-        ## enc_output *= non_pad_mask
+        enc_output *= non_pad_mask
 
         enc_output = self.bottleneck(enc_output)
-        ## enc_output *= non_pad_mask
+        enc_output *= non_pad_mask
 
         return enc_output, encoder_self_attn
 
@@ -252,7 +252,7 @@ class MultiHeadAttention(nn.Module):
         key = key.transpose(1, 2).contiguous()
         value = value.transpose(1, 2).contiguous()
 
-        if len(mask) != 0:
+        if mask is not None:
             # mask = mask.repeat(n_head, 1, 1)  # [n_head * batch_size, seq_length, seq_length]
             mask = mask.unsqueeze(1)
         output, attn = self.attention(query, key, value, mask=mask)  # [batch, n_head, q_length, dv]
