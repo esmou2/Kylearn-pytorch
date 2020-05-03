@@ -1,4 +1,4 @@
-from utils.embeddings import get_embeddings
+from utils.embeddings import get_w2v_embeddings
 from Implementation.nlp_smart_dispatching.dataloader import TextualDataloader
 from Implementation.nlp_smart_dispatching.metrics import metrics_multi, draw_confusion_matrix
 from Models.transformer import TransormerClassifierModel
@@ -9,7 +9,7 @@ dataloader = TextualDataloader('data/train_set.csv','data/test_set.csv',
                                      batch_size=100, eval_portion=0.2, cut_length=100)
 
 # get word2vec embedding list
-embedding, vector_length = get_embeddings('data/CBOW.model', padding=True)
+embedding, vector_length = get_w2v_embeddings('data/CBOW.model', padding=True)
 
 save_name = 'nlp-encoder-100-'
 # Implement model

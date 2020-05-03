@@ -1,4 +1,4 @@
-from utils.embeddings import get_embeddings
+from utils.embeddings import get_w2v_embeddings
 from Implementation.ciena_transformer.dataloader import CienaPortDataloader
 from Implementation.ciena_transformer.model import CienaTransformerModel
 

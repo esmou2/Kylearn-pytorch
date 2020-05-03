@@ -10,6 +10,7 @@ from Training.evaluation import accuracy, precision_recall, Evaluator
 from Training.control import TrainingControl, EarlyStopping
 from tqdm import tqdm
 
+
 def parse_data_enc(input_sequence, embedding):
     '''
     Returns:
@@ -42,7 +43,8 @@ def parse_data_dec(input_sequence, target_sequence, embedding):
 
 class TransormerClassifierModel(Model):
     def __init__(
-            self, save_path, log_path, d_features, d_meta, max_length, d_classifier, n_classes, threshold=None, embedding=None,
+            self, save_path, log_path, d_features, d_meta, max_length, d_classifier, n_classes, threshold=None,
+            embedding=None,
             stack='Encoder', position_encode='SinusoidPositionEncoding', optimizer=None, **kwargs):
         '''**kwargs: n_layers, n_head, dropout, use_bottleneck, d_bottleneck'''
 
@@ -50,7 +52,7 @@ class TransormerClassifierModel(Model):
         self.d_output = n_classes
         self.threshold = threshold
         self.max_length = max_length
-        
+
         # ----------------------------- Model ------------------------------ #
         stack_dict = {
             'Plain': Plain,
@@ -63,8 +65,9 @@ class TransormerClassifierModel(Model):
             'TimeFacilityEncoding': TimeFacilityEncoding
         }
 
-        self.model = stack_dict[stack](encoding_dict[position_encode], d_features=d_features, max_seq_length=max_length, d_meta=d_meta, **kwargs)
-        
+        self.model = stack_dict[stack](encoding_dict[position_encode], d_features=d_features, max_seq_length=max_length,
+                                       d_meta=d_meta, **kwargs)
+
         # --------------------------- Embedding  --------------------------- #
         if embedding is None:
             self.word_embedding = None
@@ -76,7 +79,7 @@ class TransormerClassifierModel(Model):
 
         # --------------------------- Classifier --------------------------- #
         self.classifier = LinearClassifier(d_features * max_length, d_classifier, n_classes)
-        
+
         # ------------------------------ CUDA ------------------------------ #
         self.data_parallel()
 
@@ -122,7 +125,7 @@ class TransormerClassifierModel(Model):
             # get data from dataloader
 
             index, position, y = map(lambda x: x.to(device), batch)
-            
+
             batch_size = len(index)
 
             input_feature_sequence, non_pad_mask, slf_attn_mask = parse_data_enc(index, self.word_embedding)
@@ -242,15 +245,13 @@ class TransormerClassifierModel(Model):
             self.summary_writer.add_scalar('precision/eval', pre_avg, step)
             self.summary_writer.add_scalar('recall/eval', rec_avg, step)
 
-
             state_dict = self.early_stopping(loss_avg)
 
             if state_dict['save']:
                 checkpoint = self.checkpoint(step)
-                self.save_model(checkpoint, self.save_path + '-step-%d_loss-%.5f'%(step,loss_avg))
+                self.save_model(checkpoint, self.save_path + '-step-%d_loss-%.5f' % (step, loss_avg))
 
             return state_dict['break']
-
 
     def train(self, max_epoch, train_dataloader, eval_dataloader, device,
               smoothing=False, earlystop=False, save_mode='best'):
@@ -277,8 +278,9 @@ class TransormerClassifierModel(Model):
 
         self.save_model(checkpoint, self.save_path + '-step-%d' % state_dict['step'])
 
-        self.train_logger.info('[INFO]: Finish Training, ends with %d epoch(s) and %d batches, in total %d training steps.' % (
-            state_dict['epoch'] - 1, state_dict['batch'], state_dict['step']))
+        self.train_logger.info(
+            '[INFO]: Finish Training, ends with %d epoch(s) and %d batches, in total %d training steps.' % (
+                state_dict['epoch'] - 1, state_dict['batch'], state_dict['step']))
 
     def get_predictions(self, data_loader, device, max_batches=None, activation=None):
 
@@ -321,5 +323,3 @@ class TransormerClassifierModel(Model):
                         break
 
         return pred_list, real_list
-
-
