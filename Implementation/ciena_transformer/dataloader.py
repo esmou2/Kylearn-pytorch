@@ -5,19 +5,24 @@ from torch.utils.data.sampler import SubsetRandomSampler
 from Dataloader.samplers import BalanceSampler
 from sklearn.preprocessing import LabelEncoder
 
+
 def facility_to_index(facility_name, facilities):
     label_encoder = LabelEncoder().fit(facility_name)
     indexes = label_encoder.transform(facilities)
     return indexes
 
+
 class CienaPortDataset(Dataset):
     def __init__(self, file_path, max_length=None, facility_names=None):
         super().__init__()
         # Load training data
-        self.targets = np.load(file_path + '4transformer_label.npy', allow_pickle=True) # [batch, 1]
-        self.feature_sequence = np.load(file_path + '4transformer_PMs.npy', allow_pickle=True, encoding='bytes').astype(np.float32)
-        self.padding = np.load(file_path + '4transformer_padding.npy', allow_pickle=True).astype(np.long)  # [batch, t*max_length, 1]
-        self.time_facility = np.load(file_path + '4transformer_Time_Facility.npy', allow_pickle=True)  # [batch, t*max_length, 2]
+        self.targets = np.load(file_path + '4transformer_label.npy', allow_pickle=True)  # [batch, 1]
+        self.feature_sequence = np.load(file_path + '4transformer_PMs.npy', allow_pickle=True, encoding='bytes').astype(
+            np.float32)
+        self.padding = np.load(file_path + '4transformer_padding.npy', allow_pickle=True).astype(
+            np.long)  # [batch, t*max_length, 1]
+        self.time_facility = np.load(file_path + '4transformer_Time_Facility.npy',
+                                     allow_pickle=True)  # [batch, t*max_length, 2]
 
         # Fill features nan with 0
         where_nan = np.isnan(self.feature_sequence)
@@ -34,8 +39,6 @@ class CienaPortDataset(Dataset):
         self.time_facility[:, :, 1] = facility_index
         self.time_facility = self.time_facility.astype(np.long)
 
-
-
         self.max_length = max_length
 
     def __len__(self):
@@ -51,8 +54,10 @@ class CienaPortDataset(Dataset):
 
         return sample
 
+
 class CienaPortDataloader():
-    def __init__(self, train_path, test_path, batch_size, eval_portion, max_length=207, shuffle=True, facility_names=None):
+    def __init__(self, train_path, test_path, batch_size, eval_portion, max_length=207, shuffle=True,
+                 facility_names=None):
         train_set = CienaPortDataset(train_path, max_length=max_length, facility_names=facility_names)
         test_set = CienaPortDataset(test_path, max_length=max_length, facility_names=facility_names)
 
@@ -77,7 +82,6 @@ class CienaPortDataloader():
         self.val_loader = DataLoader(train_set, batch_size, sampler=valid_sampler, num_workers=4)
         self.test_loader = DataLoader(test_set, batch_size, num_workers=4)
 
-
     def train_dataloader(self):
         return self.train_loader
 
@@ -86,4 +90,3 @@ class CienaPortDataloader():
 
     def test_dataloader(self):
         return self.test_loader
-

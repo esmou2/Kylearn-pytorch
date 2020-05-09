@@ -256,7 +256,7 @@ class CienaTransformerModel(Model):
 
         # train for n epoch
         for epoch_i in range(max_epoch):
-            print('[ Epoch', epoch_i, ']')
+            print('\n[ Epoch', epoch_i, ']')
             # set current epoch
             self.controller.set_epoch(epoch_i + 1)
             # train for on epoch

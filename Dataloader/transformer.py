@@ -6,17 +6,16 @@ from sklearn.model_selection import train_test_split
 
 
 def process_indexes(index_series, max_length=None):
-    '''
+    """
         Argument:
             index_series {Pandas Series} -- A Series of indexes, each element is a string contains the indexes
         Returns:
             idx_seq {Numpy ndarray, shape [n_rows_of_data, max_length]} -- a 2-D array of word indexes, padding with 0
             pos_seq {Numpy ndarray, shape [n_rows_of_data, max_length]} -- a 2-D array of position indexes, padding with 0
             max_length {Int} -- the max length of all lists in the Series
-    '''
+    """
     # string to list
     # index_series = index_series.reset_index()
-
     indexes = index_series.map(lambda x: eval(x))
     # get list length
     length = indexes.map(lambda x: len(x))
@@ -28,7 +27,6 @@ def process_indexes(index_series, max_length=None):
     # length {Pandas Seires} -- each element is the length of the list of indexes
     # position {Pandas Series} -- each element is a list of positions
     # max_length {Int} -- the max length of all lists in the Series
-
     if max_length is None:
         max_length = max_length_
     else:
