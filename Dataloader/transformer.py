@@ -18,6 +18,9 @@ def process_indexes(index_series, max_length=None):
     # index_series = index_series.reset_index()
     # indexes = index_series.map(lambda x: eval(x))
     indexes = index_series
+    if max_length is not None:
+        indexes = indexes.map(lambda x: x[:max_length])
+
     # get list length
     length = indexes.map(lambda x: len(x))
     # generate position

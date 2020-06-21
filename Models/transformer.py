@@ -11,7 +11,7 @@ from Training.control import TrainingControl, EarlyStopping
 from tqdm import tqdm
 
 
-def parse_data_enc(input_sequence, embedding):
+def parse_data_enc(input_sequence, embedding=None):
     '''
     Returns:
         enc_output {Tensor, [batch_size, seq_length, d_v]} --
@@ -23,7 +23,7 @@ def parse_data_enc(input_sequence, embedding):
                                           padding_idx=0)  # [batch_size, seq_length, seq_length]
     non_pad_mask = get_non_pad_mask(input_sequence, padding_idx=0)  # [batch_size, seq_length, 1]
 
-    embedding_sequence = embedding(input_sequence)
+    embedding_sequence = input_sequence# embedding(input_sequence)
 
     return embedding_sequence, non_pad_mask, slf_attn_mask
 
@@ -109,7 +109,6 @@ class TransormerClassifierModel(Model):
         # for batch in tqdm(
         #         train_dataloader, mininterval=1,
         #         desc='  - (Training)   ', leave=False):  # training_data should be a iterable
-        print(train_dataloader)
         for batch in tqdm(
                 train_dataloader, mininterval=1,
                 desc='  - (Training)   ', leave=False):  # training_data should be a iterable
@@ -120,16 +119,19 @@ class TransormerClassifierModel(Model):
             # get data from dataloader
 
             # index, position, y = map(lambda x: x.to(device), batch)
-            text, y = map(lambda x: x.to(device), batch)
+            text, position, y = map(lambda x: x.to(device), batch)
+            # text, y = map(lambda x: x.to(device), batch)
             # batch_size = len(index)
             batch_size = len(text)
 
             # input_feature_sequence, non_pad_mask, slf_attn_mask = parse_data_enc(index, self.word_embedding)
+            input_feature_sequence, non_pad_mask, slf_attn_mask = parse_data_enc(text) #, self.word_embedding)
 
             # forward
             self.optimizer.zero_grad()
-            # logits, attn = self.model(input_feature_sequence, position, non_pad_mask, slf_attn_mask)
-            logits, attn = self.model(text)
+            logits, attn = self.model(input_feature_sequence, position, non_pad_mask, slf_attn_mask)
+            # logits, attn = self.model(input_feature_sequence, non_pad_mask, slf_attn_mask)
+            # logits, attn = self.model(text)
             logits = logits.view(batch_size, -1)
             logits = self.classifier(logits)
 
@@ -150,6 +152,7 @@ class TransormerClassifierModel(Model):
 
             # get metrics for logging
             acc = accuracy(pred, y, threshold=self.threshold)
+
             precision, recall, precision_avg, recall_avg = precision_recall(pred, y, self.d_output,
                                                                             threshold=self.threshold)
             batch_counter += 1
@@ -201,7 +204,7 @@ class TransormerClassifierModel(Model):
 
                 batch_size = len(index)
 
-                input_feature_sequence, non_pad_mask, slf_attn_mask = parse_data_enc(index, self.word_embedding)
+                input_feature_sequence, non_pad_mask, slf_attn_mask = parse_data_enc(index)#, self.word_embedding)
 
                 # get logits
                 logits, attn = self.model(input_feature_sequence, position, non_pad_mask, slf_attn_mask)
@@ -293,7 +296,8 @@ class TransormerClassifierModel(Model):
 
                 index, position, y = map(lambda x: x.to(device), batch)
 
-                input_feature_sequence, non_pad_mask, slf_attn_mask = parse_data_enc(index, self.word_embedding)
+                # input_feature_sequence, non_pad_mask, slf_attn_mask = parse_data_enc(index, self.word_embedding)
+                input_feature_sequence, non_pad_mask, slf_attn_mask = parse_data_enc(index)
 
                 # get logits
                 logits, attn = self.model(input_feature_sequence, position, non_pad_mask, slf_attn_mask)

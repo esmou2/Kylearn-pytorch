@@ -62,7 +62,7 @@ class EncoderLayer(nn.Module):
         if use_bottleneck:
             self.bottleneck = PositionwiseFeedForward(d_features, d_bottleneck, dropout=dropout)
 
-    def forward(self, enc_input, non_pad_mask=None, slf_attn_mask=None):
+    def forward(self, enc_input, non_pad_mask, slf_attn_mask=None):
         '''
             Arguments:
                 enc_input {Tensor, shape [batch, length, d_features]} -- input

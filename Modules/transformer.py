@@ -97,8 +97,9 @@ class Encoder(nn.Module):
         # self.layer_norm = nn.LayerNorm(d_features)
         self.layer_norm = nn.LayerNorm(d_model)
 
-    # def forward(self, feature_sequence, position, non_pad_mask=None, slf_attn_mask=None):
-    def forward(self, x, non_pad_mask=None, slf_attn_mask=None):
+    # def forward(self, feature_sequence, position, non_pad_mask, slf_attn_mask):
+    def forward(self, x, position, non_pad_mask, slf_attn_mask):
+    # def forward(self, x, non_pad_mask, slf_attn_mask=None):
         '''
             Arguments:
                 input_feature_sequence {Tensor, shape [batch, max_sequence_length, d_features]} -- input feature sequence

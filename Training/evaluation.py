@@ -67,8 +67,12 @@ def precision_recall(pred, real, d_output, threshold=None, average='macro', eps 
             pred = one_hot_embedding(pred, 2)
             real = one_hot_embedding(real, 2)
         else:
+            pred = pred.argmax(dim=-1).view(n, -1)
+            real = real.view(n, -1)
             pred = one_hot_embedding(torch.argmax(pred, -1).view(n, -1), d_output)
-            real = one_hot_embedding(real, d_output)
+
+            real = one_hot_embedding(torch.argmax(real, -1).view(n, -1), d_output)
+
 
     tp = (pred & real)
     tp_count = tp.sum(0).float()
