@@ -16,7 +16,8 @@ def process_indexes(index_series, max_length=None):
     """
     # string to list
     # index_series = index_series.reset_index()
-    indexes = index_series.map(lambda x: eval(x))
+    # indexes = index_series.map(lambda x: eval(x))
+    indexes = index_series
     # get list length
     length = indexes.map(lambda x: len(x))
     # generate position
@@ -27,18 +28,18 @@ def process_indexes(index_series, max_length=None):
     # length {Pandas Seires} -- each element is the length of the list of indexes
     # position {Pandas Series} -- each element is a list of positions
     # max_length {Int} -- the max length of all lists in the Series
-    if max_length is None:
-        max_length = max_length_
-    else:
-        if max_length < max_length_:
-            raise Exception(
-                'Exists index sequence with a length larger than max_length, please check if max_length applies for all of your datasets.')
+    # if max_length is None:
+    #     max_length = max_length_
+    # else:
+    #     if max_length < max_length_:
+    #         raise Exception(
+    #             'Exists index sequence with a length larger than max_length, please check if max_length applies for all of your datasets.')
 
     # Pad the sequences with -1 to the same length (max_length), for the use of indexing, shift the sequence with 1
-    idx_seq = padding_data(indexes, max_length, padding_value=-1) + 1
-    pos_seq = padding_data(position, max_length, padding_value=-1) + 1
+    idx_seq = padding_data(indexes, max_length_, padding_value=-1) + 1
+    pos_seq = padding_data(position, max_length_, padding_value=-1) + 1
 
-    return idx_seq, pos_seq, max_length
+    return idx_seq, pos_seq, max_length_ # max_length
 
 
 class TransformerClsDataset(Dataset):

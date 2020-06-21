@@ -1,6 +1,10 @@
+import math
+
 import torch
 import torch.nn as nn
 import numpy as np
+from torch.autograd import Variable
+
 
 def get_sinusoid_encoding_table(n_position, d_hid, padding_idx=None):
     '''
@@ -31,13 +35,15 @@ def get_sinusoid_encoding_table(n_position, d_hid, padding_idx=None):
 
     return torch.FloatTensor(sinusoid_table)
 
+
 class SinusoidPositionEncoding(nn.Module):
 
-    def __init__(self, d_features, max_length=None, d_meta = None):
+    def __init__(self, d_features, max_length=None, d_meta=None):
         super().__init__()
         self.position_enc = nn.Embedding.from_pretrained(
             get_sinusoid_encoding_table(max_length, d_features, padding_idx=0),
             freeze=True)
+        # self.position_enc = get_sinusoid_encoding_table(max_length, d_features, padding_idx=0)
 
     def forward(self, x):
         '''
@@ -50,9 +56,10 @@ class SinusoidPositionEncoding(nn.Module):
         pass
         return x
 
+
 class LinearPositionEncoding(nn.Module):
 
-    def __init__(self, d_features, max_length=None, d_meta = None):
+    def __init__(self, d_features, max_length=None, d_meta=None):
         super().__init__()
         self.position_enc = nn.Linear(d_meta, d_features, bias=False)
         self.tanh = nn.Tanh()
@@ -65,15 +72,14 @@ class LinearPositionEncoding(nn.Module):
 
 class TimeFacilityEncoding(nn.Module):
 
-    def __init__(self, d_features, max_length=None, d_meta = None):
+    def __init__(self, d_features, max_length=None, d_meta=None):
         super().__init__()
         self.time_enc = nn.Embedding.from_pretrained(
             get_sinusoid_encoding_table(max_length, d_features, padding_idx=0),
             freeze=True)
         torch.manual_seed(1)
-        self.facility_enc = torch.nn.Embedding(d_meta+1, d_features, padding_idx=0)
+        self.facility_enc = torch.nn.Embedding(d_meta + 1, d_features, padding_idx=0)
         self.facility_enc.weight.requires_grad = False
-
 
     def forward(self, x):
         '''
@@ -89,4 +95,32 @@ class TimeFacilityEncoding(nn.Module):
         time = self.time_enc(time)
 
         x = time + facility
+        return x
+
+
+class PositionalEncoder(nn.Module):
+    def __init__(self, d_model, max_seq_len=80):
+        super().__init__()
+        self.d_model = d_model
+
+        # create constant 'pe' matrix with values dependant on
+        # pos and i
+        pe = torch.zeros(max_seq_len, d_model)
+        for pos in range(max_seq_len):
+            for i in range(0, d_model, 2):
+                pe[pos, i] = \
+                    math.sin(pos / (10000 ** ((2 * i) / d_model)))
+                pe[pos, i + 1] = \
+                    math.cos(pos / (10000 ** ((2 * (i + 1)) / d_model)))
+
+        pe = pe.unsqueeze(0)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        # make embeddings relatively larger
+        x = x * math.sqrt(self.d_model)
+        # add constant to embedding
+        seq_len = x.size(1)
+        x = x + Variable(self.pe[:, :seq_len], \
+                         requires_grad=False)
         return x

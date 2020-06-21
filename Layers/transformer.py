@@ -16,6 +16,7 @@ def get_non_pad_mask(seq, padding_idx=0):
     mask = seq.ne(padding_idx).type(torch.float)
     return mask.unsqueeze(-1)
 
+
 def get_attn_key_pad_mask(seq_k, seq_q, padding_idx=0):
     '''
         For masking out the padding part of key sequence.
@@ -36,6 +37,7 @@ def get_attn_key_pad_mask(seq_k, seq_q, padding_idx=0):
 
     return padding_mask
 
+
 def get_subsequent_mask(seq):
     ''' For masking out the subsequent info. '''
 
@@ -45,6 +47,7 @@ def get_subsequent_mask(seq):
     subsequent_mask = subsequent_mask.unsqueeze(0).expand(sz_b, -1, -1)  # b x ls x ls
 
     return subsequent_mask
+
 
 class EncoderLayer(nn.Module):
     # def __init__(self, d_model, d_inner, n_head, d_k, d_v, dropout=0.1):
@@ -119,7 +122,7 @@ class DecoderLayer(nn.Module):
             dec_output, enc_output, enc_output, mask=dec_enc_attn_mask)
         dec_output *= non_pad_mask
 
-        dec_output = self.pos_ffn(dec_output) # wider the network
+        dec_output = self.pos_ffn(dec_output)  # wider the network
         dec_output *= non_pad_mask
 
         return dec_output, dec_slf_attn, dec_enc_attn
@@ -181,17 +184,18 @@ class ScaledDotProductAttention(nn.Module):
                 attn {Tensor, shape [n_head * batch, q_length, k_length] -- self attention
 
         '''
-        attn = torch.matmul(query / self.temperature, key.transpose(2, 3)) # [batch, n_head, q_length, k_length]
+        attn = torch.matmul(query / self.temperature, key.transpose(2, 3))  # [batch, n_head, q_length, k_length]
 
         if mask is not None:
             attn = attn.masked_fill(mask, -np.inf)
 
-        attn = self.softmax(attn, dim=-1) # softmax over k_length
+        attn = self.softmax(attn, dim=-1)  # softmax over k_length
         attn = self.dropout(attn)  # [batch, n_head, q_length, k_length]
         output = torch.matmul(attn, value)  # [batch, n_head, q_length, dv]
         # output = value
 
         return output, attn
+
 
 class MultiHeadAttention(nn.Module):
     def __init__(self, n_head, d_features, d_k, d_v, dropout=0.1):
@@ -213,7 +217,6 @@ class MultiHeadAttention(nn.Module):
 
         self.fc = nn.Linear(n_head * d_v, d_features, bias=False)
         # nn.init.xavier_normal_(self.fc.weight)
-
 
     def forward(self, query, key, value, mask=None):
         '''
@@ -273,8 +276,8 @@ class PositionwiseFeedForward(nn.Module):
 
     def __init__(self, d_in, d_hid, dropout=0.1):
         super().__init__()
-        self.w_1 = nn.Linear(d_in, d_hid) # position-wise
-        self.w_2 = nn.Linear(d_hid, d_in) # position-wise
+        self.w_1 = nn.Linear(d_in, d_hid)  # position-wise
+        self.w_2 = nn.Linear(d_hid, d_in)  # position-wise
         self.layer_norm = nn.LayerNorm(d_in, eps=1e-6)
         self.dropout = nn.Dropout(dropout)
 

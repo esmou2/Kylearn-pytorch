@@ -43,9 +43,10 @@ def parse_data_dec(input_sequence, target_sequence, embedding):
 
 class TransormerClassifierModel(Model):
     def __init__(
-            self, save_path, log_path, d_features, d_meta, max_length, d_classifier, n_classes, threshold=None,
-            embedding=None,
-            stack='Encoder', position_encode='SinusoidPositionEncoding', optimizer=None, **kwargs):
+            self, save_path, log_path, d_meta, max_length, d_classifier, n_classes, vocab_size, d_model,
+            threshold=None,
+            stack='Encoder',
+            position_encode='SinusoidPositionEncoding', optimizer=None, **kwargs):
         '''**kwargs: n_layers, n_head, dropout, use_bottleneck, d_bottleneck'''
 
         super().__init__(save_path, log_path)
@@ -64,21 +65,11 @@ class TransormerClassifierModel(Model):
             'LinearPositionEncoding': LinearPositionEncoding,
             'TimeFacilityEncoding': TimeFacilityEncoding
         }
-
-        self.model = stack_dict[stack](encoding_dict[position_encode], d_features=d_features, max_seq_length=max_length,
-                                       d_meta=d_meta, **kwargs)
-
-        # --------------------------- Embedding  --------------------------- #
-        if embedding is None:
-            self.word_embedding = None
-            self.USE_EMBEDDING = False
-
-        else:
-            self.word_embedding = nn.Embedding.from_pretrained(embedding)
-            self.USE_EMBEDDING = True
+        self.model = stack_dict[stack](encoding_dict[position_encode], max_seq_length=max_length,
+                                       d_meta=d_meta, vocab_size=vocab_size, d_model=d_model, **kwargs)
 
         # --------------------------- Classifier --------------------------- #
-        self.classifier = LinearClassifier(d_features * max_length, d_classifier, n_classes)
+        self.classifier = LinearClassifier(d_model * max_length, d_classifier, n_classes)
 
         # ------------------------------ CUDA ------------------------------ #
         self.data_parallel()
@@ -115,6 +106,10 @@ class TransormerClassifierModel(Model):
         batch_counter = 0
 
         # update param per batch
+        # for batch in tqdm(
+        #         train_dataloader, mininterval=1,
+        #         desc='  - (Training)   ', leave=False):  # training_data should be a iterable
+        print(train_dataloader)
         for batch in tqdm(
                 train_dataloader, mininterval=1,
                 desc='  - (Training)   ', leave=False):  # training_data should be a iterable
@@ -124,15 +119,17 @@ class TransormerClassifierModel(Model):
 
             # get data from dataloader
 
-            index, position, y = map(lambda x: x.to(device), batch)
+            # index, position, y = map(lambda x: x.to(device), batch)
+            text, y = map(lambda x: x.to(device), batch)
+            # batch_size = len(index)
+            batch_size = len(text)
 
-            batch_size = len(index)
-
-            input_feature_sequence, non_pad_mask, slf_attn_mask = parse_data_enc(index, self.word_embedding)
+            # input_feature_sequence, non_pad_mask, slf_attn_mask = parse_data_enc(index, self.word_embedding)
 
             # forward
             self.optimizer.zero_grad()
-            logits, attn = self.model(input_feature_sequence, position, non_pad_mask, slf_attn_mask)
+            # logits, attn = self.model(input_feature_sequence, position, non_pad_mask, slf_attn_mask)
+            logits, attn = self.model(text)
             logits = logits.view(batch_size, -1)
             logits = self.classifier(logits)
 
@@ -260,9 +257,6 @@ class TransormerClassifierModel(Model):
         # if not (lr is None):
         #     self.set_optimizer(Adam, lr, betas=(0.9, 0.999), weight_decay=0)
 
-        if self.USE_EMBEDDING:
-            self.word_embedding = self.word_embedding.to(device)
-
         # train for n epoch
         for epoch_i in range(max_epoch):
             print('[ Epoch', epoch_i, ']')
@@ -283,9 +277,6 @@ class TransormerClassifierModel(Model):
                 state_dict['epoch'] - 1, state_dict['batch'], state_dict['step']))
 
     def get_predictions(self, data_loader, device, max_batches=None, activation=None):
-
-        if self.USE_EMBEDDING:
-            self.word_embedding = self.word_embedding.to(device)
 
         pred_list = []
         real_list = []

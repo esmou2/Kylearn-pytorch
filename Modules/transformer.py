@@ -1,12 +1,20 @@
+import math
+
+import torch
 import torch.nn as nn
+from torch.autograd import Variable
+
+from Layers.encodings import PositionalEncoder
 from Layers.transformer import EncoderLayer, DecoderLayer
 import numpy as np
+
 
 class Plain(nn.Module):
     ''' A Plain module. '''
 
     def __init__(
-            self, position_encoding_layer, n_layers, n_head, d_features, max_seq_length, d_meta, d_k=None, d_v=None, dropout=0.1, use_bottleneck=True, d_bottleneck=256):
+            self, position_encoding_layer, n_layers, n_head, d_features, max_seq_length, d_meta, d_k=None, d_v=None,
+            dropout=0.1, use_bottleneck=True, d_bottleneck=256):
         super().__init__()
 
         if d_k == None or d_v == None:
@@ -21,7 +29,8 @@ class Plain(nn.Module):
         self.position_enc = position_encoding_layer(d_features=d_features, max_length=max_seq_length, d_meta=d_meta)
 
         self.layer_stack = nn.ModuleList([
-            EncoderLayer(d_features, n_head, d_k, d_v, dropout, use_bottleneck=use_bottleneck, d_bottleneck=d_bottleneck)
+            EncoderLayer(d_features, n_head, d_k, d_v, dropout, use_bottleneck=use_bottleneck,
+                         d_bottleneck=d_bottleneck)
             for _ in range(n_layers)])
 
     def forward(self, feature_sequence, position, non_pad_mask=None, slf_attn_mask=None):
@@ -48,34 +57,48 @@ class Plain(nn.Module):
 
         return enc_output, encoder_self_attn_list
 
+
 class Encoder(nn.Module):
     ''' A encoder models with self attention mechanism. '''
 
     # TIP: NO USING LAYER_NORM AT THE END OF THIS MODULE
 
     def __init__(
-            self, position_encoding_layer, n_layers, n_head, d_features, max_seq_length, d_meta, d_k=None, d_v=None, dropout=0.1, use_bottleneck=True, d_bottleneck=256):
+            self, position_encoding_layer, n_layers, n_head, max_seq_length, d_meta, vocab_size, d_model,
+            d_k=None, d_v=None,
+            dropout=0.1, use_bottleneck=True, d_bottleneck=256):
         super().__init__()
 
         if d_k == None or d_v == None:
             if d_k == d_v:
-                d_reduce_param = np.floor(d_features / n_head).astype(int)
+                d_reduce_param = np.floor(d_model / n_head).astype(int)
                 d_k, d_v = d_reduce_param, d_reduce_param
             elif d_k == None:
                 d_k = d_v
             else:
                 d_v = d_k
+        self.embeddings = Embedder(vocab_size, d_model)
+        # self.embeddings.weight.data.copy_(torch.fromnumpy(pretrained_weights))
 
-        self.position_enc = position_encoding_layer(d_features=d_features, max_length=max_seq_length, d_meta=d_meta)
+        # self.position_enc = position_encoding_layer(d_features=d_features, max_length=max_seq_length, d_meta=d_meta)
+        # self.position_enc = position_encoding_layer(d_model, d_meta=d_meta, max_length=max_seq_length)
+        self.pe = PositionalEncoder(d_model, max_seq_length)
+        # self.layer_stack = nn.ModuleList([
+        #     EncoderLayer(d_features, n_head, d_k, d_v, dropout, use_bottleneck=use_bottleneck,
+        #                  d_bottleneck=d_bottleneck)
+        #     for _ in range(n_layers)])
 
         self.layer_stack = nn.ModuleList([
-            EncoderLayer(d_features, n_head, d_k, d_v, dropout, use_bottleneck=use_bottleneck, d_bottleneck=d_bottleneck)
+            EncoderLayer(d_model, n_head, d_k, d_v, dropout, use_bottleneck=use_bottleneck,
+                         d_bottleneck=d_bottleneck)
             for _ in range(n_layers)])
         self.dropout = nn.Dropout(dropout)
 
-        self.layer_norm = nn.LayerNorm(d_features)
+        # self.layer_norm = nn.LayerNorm(d_features)
+        self.layer_norm = nn.LayerNorm(d_model)
 
-    def forward(self, feature_sequence, position, non_pad_mask=None, slf_attn_mask=None):
+    # def forward(self, feature_sequence, position, non_pad_mask=None, slf_attn_mask=None):
+    def forward(self, x, non_pad_mask=None, slf_attn_mask=None):
         '''
             Arguments:
                 input_feature_sequence {Tensor, shape [batch, max_sequence_length, d_features]} -- input feature sequence
@@ -92,9 +115,14 @@ class Encoder(nn.Module):
         encoder_self_attn_list = []
 
         # Add position information at the beginning
-        pos_enc = self.position_enc(position)
-        enc_output = feature_sequence + pos_enc
-        enc_output = self.dropout(enc_output)
+        embeds = self.embeddings(x)
+        # pos_enc = self.position_enc(position)
+        # pos_enc = self.position_enc(embeds)
+        pos_enc = self.pe(embeds)
+
+        # enc_output = feature_sequence + pos_enc
+        # enc_output = self.dropout(enc_output)
+        enc_output = self.dropout(pos_enc)
 
         for enc_layer in self.layer_stack:
             enc_output, encoder_self_attn = enc_layer(
@@ -113,8 +141,8 @@ class Decoder(nn.Module):
     ''' A decoder models with self attention mechanism. '''
 
     def __init__(
-            self, position_encoding_layer, n_layers, n_head, d_features, max_seq_length, d_meta, dropout=0.1, use_bottleneck=True, d_bottleneck=256):
-
+            self, position_encoding_layer, n_layers, n_head, d_features, max_seq_length, d_meta, dropout=0.1,
+            use_bottleneck=True, d_bottleneck=256):
         super().__init__()
 
         self.position_enc = position_encoding_layer(d_features=d_features, max_length=max_seq_length, d_meta=d_meta)
@@ -123,7 +151,8 @@ class Decoder(nn.Module):
             DecoderLayer(d_features, n_head, dropout, use_bottleneck=use_bottleneck, d_bottleneck=d_bottleneck)
             for _ in range(n_layers)])
 
-    def forward(self, target_feature_sequence, tg_position, enc_output, non_pad_mask=None, slf_attn_mask=None, dec_enc_attn_mask=None):
+    def forward(self, target_feature_sequence, tg_position, enc_output, non_pad_mask=None, slf_attn_mask=None,
+                dec_enc_attn_mask=None):
         '''
             Arguments:
                 target_feature_sequence {Tensor, shape [batch, max_sequence_length, d_features]} -- input feature sequence
@@ -159,14 +188,16 @@ class Transformer(nn.Module):
     ''' A sequence to sequence models with attention mechanism. '''
 
     def __init__(
-            self, position_encoding_layer, n_layers, n_head, d_features, max_seq_length, d_meta, dropout=0.1, use_bottleneck=True,
+            self, position_encoding_layer, n_layers, n_head, d_features, max_seq_length, d_meta, dropout=0.1,
+            use_bottleneck=True,
             d_bottleneck=256):
-
         super().__init__()
 
-        self.encoder = Encoder(position_encoding_layer, n_layers, n_head, d_features, max_seq_length, d_meta, dropout, use_bottleneck, d_bottleneck)
+        self.encoder = Encoder(position_encoding_layer, n_layers, n_head, d_features, max_seq_length, d_meta, dropout,
+                               use_bottleneck, d_bottleneck)
 
-        self.decoder = Decoder(position_encoding_layer, n_layers, n_head, d_features, max_seq_length, d_meta, dropout, use_bottleneck, d_bottleneck)
+        self.decoder = Decoder(position_encoding_layer, n_layers, n_head, d_features, max_seq_length, d_meta, dropout,
+                               use_bottleneck, d_bottleneck)
 
         # Logit scaler
         # self.x_logit_scale = (d_features ** -0.5)
@@ -183,9 +214,20 @@ class Transformer(nn.Module):
         '''
 
         # target_feature_sequence, tg_position = target_feature_sequence[:, :-1], tg_position[:, :-1]
-        enc_output, encoder_self_attn_list = self.encoder(input_feature_sequence, in_position, non_pad_mask=None, slf_attn_mask=None)
-        dec_output, dec_slf_attn_list, dec_enc_attn_list = self.decoder(target_feature_sequence, tg_position, enc_output, non_pad_mask=None, slf_attn_mask=None, dec_enc_attn_mask=None)
+        enc_output, encoder_self_attn_list = self.encoder(input_feature_sequence, in_position, non_pad_mask=None,
+                                                          slf_attn_mask=None)
+        dec_output, dec_slf_attn_list, dec_enc_attn_list = self.decoder(target_feature_sequence, tg_position,
+                                                                        enc_output, non_pad_mask=None,
+                                                                        slf_attn_mask=None, dec_enc_attn_mask=None)
 
         # dec_output = self.fc(dec_output) * self.x_logit_scale
         return dec_output
 
+
+class Embedder(nn.Module):
+    def __init__(self, vocab_size, d_model):
+        super().__init__()
+        self.embed = nn.Embedding(vocab_size, d_model)
+
+    def forward(self, x):
+        return self.embed(x)
